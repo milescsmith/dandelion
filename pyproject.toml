@@ -39,8 +39,8 @@ omit = ["containter/*", "src/dandelion/external/*"]
 typeCheckingMode = "basic"
 
 [build-system]
-requires = ["setuptools>=80", "wheel", "setuptools_scm[toml]>=9.0"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling", "hatch-vcs",]
+build-backend = "hatchling.build"
 
 [project]
 name = "sc-dandelion"
@@ -49,8 +49,8 @@ authors = [{ name = "zktuong", email = "z.tuong@uq.edu.au" }]
 description = "sc-TCR/BCR-seq analysis tool"
 readme = { file = "README.md", content-type = "text/markdown" }
 license = "AGPL-3.0-or-later"
+requires-python = ">=3.11"
 classifiers = [
-  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
 ]
@@ -77,14 +77,17 @@ dependencies = [
   "palettable<3.3.4",
   "mizani<0.13.2",
   "nxviz<0.7.7",
+  "rich>=14.2.0",
+  "typer>=0.20.0",
 ]
 
 [project.urls]
 homepage = "https://github.com/zktuong/dandelion/"
 documentation = "https://sc-dandelion.readthedocs.io/"
 
-# [project.scripts]
-# my-script = "my_package.module:function
+[project.scripts]
+dandelion_preprocess = "dandelion.__main__:ddl_typer"
+# chango_clonotypes = "dandelion.changeo_clonotypes:main"
 
 [project.optional-dependencies]
 docs = [
@@ -106,20 +109,24 @@ scirpy = ["scirpy<0.23.0", "awkward<2.8.11", "mudata<0.3.3"]
 scrubet = ["scrublet<0.2.4", "annoy<1.17.0"]
 palantir = ["palantir<1.4.3", "jax<0.8.2"]
 
-[tool.setuptools]
-include-package-data = false
-package-data = { "dandelion" = [
-  "bin/tigger-genotype.R",
-  "bin/MakeDb_gentle.py",
-] }
-# Use data-files for extra files, if required
-data-files = { bin = ["bin/tigger-genotype.R", "bin/MakeDb_gentle.py"] }
+[tool.hatch.version]
+source = "vcs"
 
-[tool.setuptools.packages.find]
-include = ["dandelion*"]
-exclude = ["*docs*", "*tests*", "*container*"]
-namespaces = false
-
-[tool.setuptools_scm]
+[tool.hatch.version.raw-options]
 version_scheme = "guess-next-dev"
 local_scheme = "dirty-tag"
+
+[tool.hatch.build.targets.wheel]
+only-packages = true
+packages = ["src/dandelion"]
+
+[tool.hatch.build.targets.wheel.sources]
+"src" = ""
+"tigger-genotype" = "bin/tigger-genotype.R"
+"MakeDb_gentle" = "bin/MakeDb_gentle.py"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "_version.py"
+
+[tool.hatch.build]
+directory = "container/"

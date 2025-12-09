@@ -1,7 +1,7 @@
 from collections import defaultdict
+from collections.abc import Generator
 from io import TextIOWrapper
 from pathlib import Path
-from collections.abc import Generator
 
 
 class Tree(defaultdict):

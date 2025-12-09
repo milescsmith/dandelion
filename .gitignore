@@ -30,3 +30,4 @@ container/database/blast/mouse/mouse_BCR_C.fasta.nin
 .vscode/
 env
 build
+_version.py

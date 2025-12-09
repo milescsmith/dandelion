@@ -1717,7 +1717,7 @@ def create_germlines(
     ) = None,
     genotyped_fasta: str | None = None,
     additional_args: list[str] = [],
-    save: str | None = None,
+    save: Path | None = None,
 ) -> Dandelion:
     """
     Run CreateGermlines.py to reconstruct the germline V(D)J sequence.
@@ -1740,7 +1740,7 @@ def create_germlines(
         location to corrected v genotyped fasta file.
     additional_args : list[str], optional
         additional arguments to pass to `CreateGermlines.py.`
-    save : str | None, optional
+    save : Path | None, optional
         if provided, saves to specified file path.
 
     Returns

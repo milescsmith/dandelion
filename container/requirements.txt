@@ -64,7 +64,7 @@ requests==2.32.5
 rpy2==3.6.4
 rpy2-rinterface==3.6.3
 rpy2-robjects==3.6.3
-sc-dandelion @ git+https://www.github.com/zktuong/dandelion.git@70f164257c74df0642211cddc6af876ef8843e96
+# sc-dandelion @ git+https://www.github.com/zktuong/dandelion.git@70f164257c74df0642211cddc6af876ef8843e96
 scanpy==1.11.5
 scikit-learn==1.7.2
 scipy==1.16.3

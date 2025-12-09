@@ -2,6 +2,7 @@ FROM index.docker.io/astral/uv:python3.12-trixie-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LLVM_VERSION=19
+ENV DANDELION_VERSION=0.6.1
 
 RUN apt update -qq \
     && apt install aptitude -y \
@@ -77,15 +78,17 @@ RUN apt update -qq \
         && rm -rf /var/lib/apt/lists/*
 
 COPY scripts/setup_libraries.sh /share/setup_libraries.sh
-COPY scripts/dandelion_preprocess.py /share/dandelion_preprocess.py
-COPY scripts/changeo_clonotypes.py /share/changeo_clonotypes.py
+# COPY scripts/dandelion_preprocess.py /share/dandelion_preprocess.py
+# COPY scripts/changeo_clonotypes.py /share/changeo_clonotypes.py
 COPY scripts/prepare_imgt_database.py /share/prepare_imgt_database.py
 COPY scripts/prepare_ogrdb_database.py /share/prepare_ogrdb_database.py
 COPY scripts/utils.py /share/utils.py
 COPY tests /tests
 COPY requirements.txt /share/requirements.txt
+COPY sc_dandelion-${DANDELION_VERSION}.dev0+dirty-py3-none-any.whl /share/sc_dandelion-${DANDELION_VERSION}.dev0+dirty-py3-none-any.whl
 
-RUN uv pip install --no-cache --compile-bytecode --system --requirements /share/requirements.txt
+RUN uv pip install --no-cache --compile-bytecode --system --requirements /share/requirements.txt \
+    && uv pip install --no-cache --compile-bytecode --system /share/sc_dandelion-${DANDELION_VERSION}.dev0+dirty-py3-none-any.whl
 
 # Unsure why, but attempting to install all packages in one go failed
 # TODO: use renv
@@ -97,7 +100,7 @@ ENV GERMLINE=/share/database/germlines/
 ENV IGDATA=/share/database/igblast/
 ENV BLASTDB=/share/database/blast/
 
-# RUN chmod +x /share/setup_libraries.sh && /share/setup_libraries.sh \
-#   && /etc/profile.d/igblast.sh \
-#   && python /share/prepare_imgt_database.py --makeblastdb /usr/bin/makeblastdb --outdir /share/database --igblast_dir /share/ncbi-igblast \
-#   && python /share/prepare_ogrdb_database.py --outdir /share/database --makeblastdb /usr/bin/makeblastdb
+RUN chmod +x /share/setup_libraries.sh && /share/setup_libraries.sh \
+  && /etc/profile.d/igblast.sh \
+  && python /share/prepare_imgt_database.py --makeblastdb /usr/bin/makeblastdb --outdir /share/database --igblast_dir /share/ncbi-igblast \
+  && python /share/prepare_ogrdb_database.py --outdir /share/database --makeblastdb /usr/bin/makeblastdb
