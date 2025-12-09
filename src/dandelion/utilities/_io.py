@@ -1,23 +1,22 @@
 #!/usr/bin/env python
+import _pickle as cPickle
 import bz2
 import gzip
-import h5py
 import json
 import os
 import pickle
 import re
 import shutil
+from collections import OrderedDict, defaultdict
+from pathlib import Path
+from typing import Literal
 
-import _pickle as cPickle
+import h5py
 import networkx as nx
 import numpy as np
 import pandas as pd
-
 from anndata import AnnData
-from collections import defaultdict, OrderedDict
-from pathlib import Path
 from scanpy import logging as logg
-from typing import Literal
 
 from dandelion.tools._tools import transfer as tf
 from dandelion.utilities._core import *
@@ -199,7 +198,6 @@ def read_h5ddl(filename: Path | str = "dandelion_data.h5ddl") -> Dandelion:
             filename, group="germline", key_group="keys", value_group="values"
         )
     except:
-
         pass
 
     try:
@@ -508,9 +506,7 @@ def read_10x_vdj(
         if contig_annotations.csv and all_contig_annotations.json file(s) not found in the input folder.
 
     """
-    filename_pre = (
-        DEFAULT_PREFIX if filename_prefix is None else filename_prefix
-    )
+    filename_pre = DEFAULT_PREFIX if filename_prefix is None else filename_prefix
 
     if os.path.isdir(str(path)):
         files = os.listdir(path)
@@ -529,7 +525,7 @@ def read_10x_vdj(
         json_idx = [i for i, j in enumerate(filelist) if j.endswith(".json")]
         if len(csv_idx) == 1:
             file = str(path) + "/" + str(filelist[csv_idx[0]])
-            logg.info("Reading {}".format(str(file)))
+            logg.info(f"Reading {file!s}")
             raw = pd.read_csv(str(file))
             raw.set_index("contig_id", drop=False, inplace=True)
             fasta_file = str(file).split("_annotations.csv")[0] + ".fasta"
@@ -539,22 +535,14 @@ def read_10x_vdj(
                 str(file).split(".csv")[0] + ".json",
             )
             if os.path.exists(json_file):
-                logg.info(
-                    "Found {} file. Extracting extra information.".format(
-                        str(json_file)
-                    )
-                )
+                logg.info(f"Found {json_file!s} file. Extracting extra information.")
                 out = parse_annotation(raw)
                 with open(json_file) as f:
                     raw_json = json.load(f)
                 out_json = parse_json(raw_json)
                 out.update(out_json)
             elif os.path.exists(fasta_file):
-                logg.info(
-                    "Found {} file. Extracting extra information.".format(
-                        str(fasta_file)
-                    )
-                )
+                logg.info(f"Found {fasta_file!s} file. Extracting extra information.")
                 seqs = {}
                 fh = open(fasta_file)
                 for header, sequence in fasta_iterator(fh):
@@ -566,7 +554,7 @@ def read_10x_vdj(
         elif len(csv_idx) < 1:
             if len(json_idx) == 1:
                 json_file = str(path) + "/" + str(filelist[json_idx[0]])
-                logg.info("Reading {}".format(json_file))
+                logg.info(f"Reading {json_file}")
                 if os.path.exists(json_file):
                     with open(json_file) as f:
                         raw = json.load(f)
@@ -581,14 +569,12 @@ def read_10x_vdj(
                 )
         elif len(csv_idx) > 1:
             raise OSError(
-                "There are multiple input .csv files with the same filename prefix {} in {} folder.".format(
-                    str(filename_pre), str(path)
-                )
+                f"There are multiple input .csv files with the same filename prefix {filename_pre!s} in {path!s} folder."
             )
     elif os.path.isfile(str(path)):
         file = path
         if str(file).endswith(".csv"):
-            logg.info("Reading {}.".format(str(file)))
+            logg.info(f"Reading {file!s}.")
             raw = pd.read_csv(str(file))
             raw.set_index("contig_id", drop=False, inplace=True)
             fasta_file = str(file).split("_annotations.csv")[0] + ".fasta"
@@ -598,22 +584,14 @@ def read_10x_vdj(
                 str(file).split(".csv")[0] + ".json",
             )
             if os.path.exists(json_file):
-                logg.info(
-                    "Found {} file. Extracting extra information.".format(
-                        str(json_file)
-                    )
-                )
+                logg.info(f"Found {json_file!s} file. Extracting extra information.")
                 out = parse_annotation(raw)
                 with open(json_file) as f:
                     raw_json = json.load(f)
                 out_json = parse_json(raw_json)
                 out.update(out_json)
             elif os.path.exists(fasta_file):
-                logg.info(
-                    "Found {} file. Extracting extra information.".format(
-                        str(fasta_file)
-                    )
-                )
+                logg.info(f"Found {fasta_file!s} file. Extracting extra information.")
                 seqs = {}
                 fh = open(fasta_file)
                 for header, sequence in fasta_iterator(fh):
@@ -624,14 +602,14 @@ def read_10x_vdj(
                 out = parse_annotation(raw)
         elif str(file).endswith(".json"):
             if os.path.exists(file):
-                logg.info("Reading {}".format(file))
+                logg.info(f"Reading {file}")
                 with open(file) as f:
                     raw = json.load(f)
                 out = parse_json(raw)
             else:
-                raise OSError("{} not found.".format(file))
+                raise OSError(f"{file} not found.")
     else:
-        raise OSError("{} not found.".format(path))
+        raise OSError(f"{path} not found.")
     res = pd.DataFrame.from_dict(out, orient="index")
     # quick check if locus is malformed
     if remove_malformed:
@@ -716,16 +694,9 @@ def parse_json(data: list) -> defaultdict:
                     call = region_type_dict[rtype]
                 else:
                     continue
-                if (
-                    data[i]["annotations"][j]["feature"]["gene_name"]
-                    is not None
-                ):
+                if data[i]["annotations"][j]["feature"]["gene_name"] is not None:
                     out[key].update(
-                        {
-                            call: data[i]["annotations"][j]["feature"][
-                                "gene_name"
-                            ]
-                        }
+                        {call: data[i]["annotations"][j]["feature"]["gene_name"]}
                     )
                 else:
                     out[key].update({call: ""})
@@ -933,10 +904,7 @@ def make_all(
                     write_airr(
                         df,
                         filePath1.parent
-                        / (
-                            filePath1.name.rsplit("db-pass.tsv")[0]
-                            + "db-all.tsv"
-                        ),
+                        / (filePath1.name.rsplit("db-pass.tsv")[0] + "db-all.tsv"),
                     )
                 else:
                     write_airr(
@@ -945,22 +913,18 @@ def make_all(
                         / (filePath1.name.rsplit(out_ex)[0] + "db-all.tsv"),
                     )
                 write_airr(df2, filePath2)
+            elif loci == "tr":
+                write_airr(
+                    df1,
+                    filePath1.parent
+                    / (filePath1.name.rsplit("db-pass.tsv")[0] + "db-all.tsv"),
+                )
             else:
-                if loci == "tr":
-                    write_airr(
-                        df1,
-                        filePath1.parent
-                        / (
-                            filePath1.name.rsplit("db-pass.tsv")[0]
-                            + "db-all.tsv"
-                        ),
-                    )
-                else:
-                    write_airr(
-                        df1,
-                        filePath1.parent
-                        / (filePath1.name.rsplit(out_ex)[0] + "db-all.tsv"),
-                    )
+                write_airr(
+                    df1,
+                    filePath1.parent
+                    / (filePath1.name.rsplit(out_ex)[0] + "db-all.tsv"),
+                )
 
 
 def rename_dandelion(
@@ -1279,11 +1243,7 @@ def _read_h5_group(filename: Path | str, group: str) -> pd.DataFrame:
                             {
                                 col: np.array(
                                     [
-                                        (
-                                            x.astype(str)
-                                            if isinstance(x, bytes)
-                                            else x
-                                        )
+                                        (x.astype(str) if isinstance(x, bytes) else x)
                                         for x in structured_data_array[col]
                                     ]
                                 )
@@ -1304,9 +1264,7 @@ def _read_h5_group(filename: Path | str, group: str) -> pd.DataFrame:
         try:
             data = pd.read_hdf(filename, group)
         except:
-            raise KeyError(
-                f"{str(filename)} does not contain attribute `{group}`"
-            )
+            raise KeyError(f"{filename!s} does not contain attribute `{group}`")
     return data
 
 
@@ -1343,9 +1301,7 @@ def _read_h5_csr_matrix(filename: Path | str, group: str) -> pd.DataFrame:
         try:
             data = pd.read_hdf(filename, group)
         except:
-            raise KeyError(
-                f"{str(filename)} does not contain attribute `{group}`"
-            )
+            raise KeyError(f"{filename!s} does not contain attribute `{group}`")
     return df
 
 
@@ -1431,12 +1387,9 @@ def _read_h5_zip(
     """
     with h5py.File(filename, "r") as hf:
         try:
-            keys = [
-                key.decode("utf-8") for key in hf[f"{group}/{key_group}"][:]
-            ]
+            keys = [key.decode("utf-8") for key in hf[f"{group}/{key_group}"][:]]
             values = [
-                value.decode("utf-8")
-                for value in hf[f"{group}/{value_group}"][:]
+                value.decode("utf-8") for value in hf[f"{group}/{value_group}"][:]
             ]
             # Reconstruct the dictionary
             out_dict = dict(zip(keys, values))

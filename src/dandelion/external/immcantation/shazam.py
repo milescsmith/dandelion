@@ -1,35 +1,33 @@
+import functools
 import os
 import re
-import functools
 import warnings
-
-import pandas as pd
-import numpy as np
-
-from scanpy import logging as logg
 from typing import Literal
 
+import numpy as np
+import pandas as pd
 from plotnine import (
-    ggplot,
-    options,
     aes,
-    xlab,
-    ylab,
-    facet_wrap,
-    theme,
     annotate,
-    theme_bw,
+    facet_wrap,
     geom_histogram,
     geom_vline,
+    ggplot,
+    options,
     save_as_pdf_pages,
+    theme,
+    theme_bw,
+    xlab,
+    ylab,
 )
+from scanpy import logging as logg
 
 from dandelion.utilities._core import Dandelion
 from dandelion.utilities._utilities import (
     load_data,
-    write_airr,
     sanitize_data,
     sanitize_data_for_saving,
+    write_airr,
 )
 
 
@@ -77,8 +75,8 @@ def quantify_mutations(
     """
     start = logg.info("Quantifying mutations")
     try:
-        from rpy2.robjects.packages import importr
         from rpy2.rinterface import NULL
+        from rpy2.robjects.packages import importr
     except:
         raise (
             ImportError(
@@ -106,14 +104,10 @@ def quantify_mutations(
 
     seq_ = "sequence_alignment" if sequence_column is None else sequence_column
     germline_ = (
-        "germline_alignment_d_mask"
-        if germline_column is None
-        else germline_column
+        "germline_alignment_d_mask" if germline_column is None else germline_column
     )
     reg_d = NULL if region_definition is None else base.get(region_definition)
-    mut_d = (
-        NULL if mutation_definition is None else base.get(mutation_definition)
-    )
+    mut_d = NULL if mutation_definition is None else base.get(mutation_definition)
 
     if split_locus is False:
         dat_ = dat_.where(dat_.isna(), dat_.astype(str))
@@ -194,9 +188,7 @@ def quantify_mutations(
             metadata_ = metadata_.groupby(["locus", "cell_id"]).sum()
             metadatas = []
             for x in list(set(data.data["locus"])):
-                tmp = metadata_.iloc[
-                    metadata_.index.isin([x], level="locus"), :
-                ]
+                tmp = metadata_.iloc[metadata_.index.isin([x], level="locus"), :]
                 tmp.index = tmp.index.droplevel()
                 tmp.columns = [c + "_" + str(x) for c in tmp.columns]
                 metadatas.append(tmp)
@@ -236,7 +228,7 @@ def quantify_mutations(
             logg.info(
                 " finished",
                 time=start,
-                deep=("saving DataFrame at {}\n".format(str(data))),
+                deep=(f"saving DataFrame at {data!s}\n"),
             )
             write_airr(dat, data)
 
@@ -364,9 +356,9 @@ def calculate_threshold(
     """
     start = logg.info("Calculating threshold")
     try:
-        from rpy2.robjects.packages import importr
         from rpy2.rinterface import NULL
         from rpy2.robjects import FloatVector
+        from rpy2.robjects.packages import importr
     except:
         raise (
             ImportError(
@@ -380,14 +372,10 @@ def calculate_threshold(
         warnings.filterwarnings("ignore")
 
     sh = importr("shazam")
-    v_call = (
-        "v_call_genotyped" if "v_call_genotyped" in dat.columns else "v_call"
-    )
+    v_call = "v_call_genotyped" if "v_call_genotyped" in dat.columns else "v_call"
     model_ = "ham" if model is None else model
     norm_ = "len" if normalize_method is None else normalize_method
-    threshold_method_ = (
-        "density" if threshold_method is None else threshold_method
-    )
+    threshold_method_ = "density" if threshold_method is None else threshold_method
     subsample_ = NULL if subsample is None else subsample
 
     # sanitize before passing to R
@@ -414,9 +402,7 @@ def calculate_threshold(
                 **kwargs,
             )
         except:
-            logg.info(
-                "Rerun this after filtering. For now, switching to heavy mode."
-            )
+            logg.info("Rerun this after filtering. For now, switching to heavy mode.")
             dat_h = dat[dat["locus"].isin(["IGH", "TRB", "TRD"])].copy()
             dat_h_r = safe_py2rpy(dat_h)
 
@@ -447,9 +433,7 @@ def calculate_threshold(
                 )
                 threshold_method_ = "gmm"
                 threshold_model_ = (
-                    "gamma-gamma"
-                    if threshold_model is None
-                    else threshold_model
+                    "gamma-gamma" if threshold_model is None else threshold_model
                 )
                 cross_ = NULL if cross is None else cross
                 cutoff_ = "optimal" if cutoff is None else cutoff
@@ -491,7 +475,7 @@ def calculate_threshold(
         if np.isnan(threshold):
             raise ValueError(
                 "Automatic thresholding failed. Please visually inspect the resulting distribution fits"
-                + " and choose a threshold value manually."
+                " and choose a threshold value manually."
             )
         # dist_ham = pandas2ri.rpy2py_data frame(dist_ham)
         tr = threshold
@@ -514,9 +498,7 @@ def calculate_threshold(
                 + xlab("Grouped Hamming distance")
                 + ylab("Count")
                 + geom_histogram(binwidth=0.01)
-                + geom_vline(
-                    xintercept=tr, linetype="dashed", color="blue", size=0.5
-                )
+                + geom_vline(xintercept=tr, linetype="dashed", color="blue", size=0.5)
                 + annotate(
                     "text",
                     x=tr + 0.02,
@@ -534,9 +516,7 @@ def calculate_threshold(
                 + xlab("Grouped Hamming distance")
                 + ylab("Count")
                 + geom_histogram(binwidth=0.01)
-                + geom_vline(
-                    xintercept=tr, linetype="dashed", color="blue", size=0.5
-                )
+                + geom_vline(xintercept=tr, linetype="dashed", color="blue", size=0.5)
                 + annotate(
                     "text",
                     x=tr + 0.02,
@@ -578,8 +558,8 @@ def safe_py2rpy(df: pd.DataFrame) -> "rpy2 object":
     """Convert pandas DataFrame to R object safely."""
     try:
         import rpy2
-        from rpy2.robjects.conversion import localconverter
         from rpy2.robjects import pandas2ri
+        from rpy2.robjects.conversion import localconverter
     except:
         raise (
             ImportError(
@@ -587,15 +567,11 @@ def safe_py2rpy(df: pd.DataFrame) -> "rpy2 object":
             )
         )
     try:
-        with localconverter(
-            rpy2.robjects.default_converter + pandas2ri.converter
-        ):
+        with localconverter(rpy2.robjects.default_converter + pandas2ri.converter):
             return pandas2ri.py2rpy(df)
     except:
         df = df.astype(str)
-        with localconverter(
-            rpy2.robjects.default_converter + pandas2ri.converter
-        ):
+        with localconverter(rpy2.robjects.default_converter + pandas2ri.converter):
             return pandas2ri.py2rpy(df)
 
 
@@ -603,8 +579,8 @@ def safe_rpy2py(r_object) -> pd.DataFrame:
     """Convert R object to pandas DataFrame safely."""
     try:
         import rpy2
-        from rpy2.robjects.conversion import localconverter
         from rpy2.robjects import pandas2ri
+        from rpy2.robjects.conversion import localconverter
     except:
         raise (
             ImportError(

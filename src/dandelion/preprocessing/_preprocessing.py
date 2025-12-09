@@ -3,51 +3,49 @@ import os
 import re
 import tempfile
 import warnings
+from operator import countOf
+from pathlib import Path
+from subprocess import run
+from time import sleep
+from typing import Literal
 
 import anndata as ad
 import numpy as np
 import pandas as pd
-
 from anndata import AnnData
 from Bio import Align
-from operator import countOf
-from pathlib import Path
 from plotnine import (
-    ggplot,
+    aes,
+    coord_flip,
+    element_blank,
+    facet_grid,
     geom_bar,
     geom_col,
+    ggplot,
     ggtitle,
-    scale_fill_manual,
-    coord_flip,
     options,
-    element_blank,
-    aes,
+    save_as_pdf_pages,
+    scale_fill_manual,
+    theme,
+    theme_classic,
     xlab,
     ylab,
-    facet_grid,
-    theme_classic,
-    theme,
-    save_as_pdf_pages,
 )
 from scanpy import logging as logg
-from subprocess import run
-from time import sleep
 from tqdm import tqdm
-from typing import Literal
 
 from dandelion.external.immcantation.changeo import (
     assigngenes_igblast,
+    creategermlines,
     makedb_igblast,
     parsedb_heavy,
     parsedb_light,
-    creategermlines,
 )
 from dandelion.external.immcantation.tigger import tigger_genotype
-
+from dandelion.tools._tools import transfer
 from dandelion.utilities._core import *
 from dandelion.utilities._io import *
 from dandelion.utilities._utilities import *
-from dandelion.tools._tools import transfer
 
 
 def format_fasta(
@@ -88,9 +86,7 @@ def format_fasta(
     FileNotFoundError
         if path to fasta file is unknown.
     """
-    filename_pre = (
-        DEFAULT_PREFIX if filename_prefix is None else filename_prefix
-    )
+    filename_pre = DEFAULT_PREFIX if filename_prefix is None else filename_prefix
 
     file_path = check_filepath(
         fasta,
@@ -102,13 +98,13 @@ def format_fasta(
     if file_path is None:
         raise FileNotFoundError(
             "Path to fasta file is unknown. Please "
-            + "specify path to fasta file or folder containing fasta file. "
-            + "Starting folder should only contain 1 fasta file."
+            "specify path to fasta file or folder containing fasta file. "
+            "Starting folder should only contain 1 fasta file."
         )
     # before continuing, check if the file is not empty
     if os.stat(file_path).st_size == 0:
         raise ValueError(
-            f"{str(file_path)} is empty. Please check the file and try again or remove if necessary."
+            f"{file_path!s} is empty. Please check the file and try again or remove if necessary."
         )
     fh = open(file_path)
     seqs = {}
@@ -141,17 +137,16 @@ def format_fasta(
                         + "_contig"
                         + str(header).split("_contig")[1]
                     )
+            elif remove_trailing_hyphen_number:
+                newheader = (
+                    str(prefix)
+                    + separator
+                    + str(header).split("_contig")[0].split("-")[0]
+                    + "_contig"
+                    + str(header).split("_contig")[1]
+                )
             else:
-                if remove_trailing_hyphen_number:
-                    newheader = (
-                        str(prefix)
-                        + separator
-                        + str(header).split("_contig")[0].split("-")[0]
-                        + "_contig"
-                        + str(header).split("_contig")[1]
-                    )
-                else:
-                    newheader = str(prefix) + separator + str(header)
+                newheader = str(prefix) + separator + str(header)
             seqs[newheader] = sequence
         else:
             if suffix is not None:
@@ -222,57 +217,53 @@ def format_fasta(
                     str(prefix) + separator + str(b) + separator + str(suffix)
                     for b in data["barcode"]
                 ]
+        elif remove_trailing_hyphen_number:
+            data["contig_id"] = [
+                str(prefix)
+                + separator
+                + str(c).split("_contig")[0].split("-")[0]
+                + "_contig"
+                + str(c).split("_contig")[1]
+                for c in data["contig_id"]
+            ]
+            data["barcode"] = [
+                str(prefix) + separator + str(b).split("-")[0] for b in data["barcode"]
+            ]
         else:
-            if remove_trailing_hyphen_number:
-                data["contig_id"] = [
-                    str(prefix)
-                    + separator
-                    + str(c).split("_contig")[0].split("-")[0]
-                    + "_contig"
-                    + str(c).split("_contig")[1]
-                    for c in data["contig_id"]
-                ]
-                data["barcode"] = [
-                    str(prefix) + separator + str(b).split("-")[0]
-                    for b in data["barcode"]
-                ]
-            else:
-                data["contig_id"] = [
-                    str(prefix) + separator + str(c) for c in data["contig_id"]
-                ]
-                data["barcode"] = [
-                    str(prefix) + separator + str(b) for b in data["barcode"]
-                ]
+            data["contig_id"] = [
+                str(prefix) + separator + str(c) for c in data["contig_id"]
+            ]
+            data["barcode"] = [
+                str(prefix) + separator + str(b) for b in data["barcode"]
+            ]
+    elif suffix is not None:
+        if remove_trailing_hyphen_number:
+            data["contig_id"] = [
+                str(c).split("_contig")[0].split("-")[0]
+                + separator
+                + str(suffix)
+                + "_contig"
+                + str(c).split("_contig")[1]
+                for c in data["contig_id"]
+            ]
+            data["barcode"] = [
+                str(b).split("-")[0] + separator + str(suffix) for b in data["barcode"]
+            ]
+        else:
+            data["contig_id"] = [
+                str(c).split("_contig")[0]
+                + separator
+                + str(suffix)
+                + "_contig"
+                + str(c).split("_contig")[1]
+                for c in data["contig_id"]
+            ]
+            data["barcode"] = [
+                str(b) + separator + str(suffix) for b in data["barcode"]
+            ]
     else:
-        if suffix is not None:
-            if remove_trailing_hyphen_number:
-                data["contig_id"] = [
-                    str(c).split("_contig")[0].split("-")[0]
-                    + separator
-                    + str(suffix)
-                    + "_contig"
-                    + str(c).split("_contig")[1]
-                    for c in data["contig_id"]
-                ]
-                data["barcode"] = [
-                    str(b).split("-")[0] + separator + str(suffix)
-                    for b in data["barcode"]
-                ]
-            else:
-                data["contig_id"] = [
-                    str(c).split("_contig")[0]
-                    + separator
-                    + str(suffix)
-                    + "_contig"
-                    + str(c).split("_contig")[1]
-                    for c in data["contig_id"]
-                ]
-                data["barcode"] = [
-                    str(b) + separator + str(suffix) for b in data["barcode"]
-                ]
-        else:
-            data["contig_id"] = [str(c) for c in data["contig_id"]]
-            data["barcode"] = [str(b) for b in data["barcode"]]
+        data["contig_id"] = [str(c) for c in data["contig_id"]]
+        data["barcode"] = [str(b) for b in data["barcode"]]
     anno = check_filepath(
         fasta,
         filename_prefix=filename_pre,
@@ -285,9 +276,7 @@ def format_fasta(
     fh1.close()
     if high_confidence_filtering:
         hiconf_contigs = [
-            x
-            for x, y in zip(data["contig_id"], data["high_confidence"])
-            if y in TRUES
+            x for x, y in zip(data["contig_id"], data["high_confidence"]) if y in TRUES
         ]
         seqs = {hiconf: seqs[hiconf] for hiconf in hiconf_contigs}
         data = data[data["contig_id"].isin(hiconf_contigs)]
@@ -379,29 +368,28 @@ def format_fastas(
                     out_dir=out_dir,
                     filename_prefix=filename_prefix[i],
                 )
+        elif suffix is not None:
+            format_fasta(
+                fastas[i],
+                prefix=None,
+                suffix=suffix_dict[fastas[i]],
+                sep=sep,
+                remove_trailing_hyphen_number=remove_trailing_hyphen_number,
+                high_confidence_filtering=high_confidence_filtering,
+                out_dir=out_dir,
+                filename_prefix=filename_prefix[i],
+            )
         else:
-            if suffix is not None:
-                format_fasta(
-                    fastas[i],
-                    prefix=None,
-                    suffix=suffix_dict[fastas[i]],
-                    sep=sep,
-                    remove_trailing_hyphen_number=remove_trailing_hyphen_number,
-                    high_confidence_filtering=high_confidence_filtering,
-                    out_dir=out_dir,
-                    filename_prefix=filename_prefix[i],
-                )
-            else:
-                format_fasta(
-                    fastas[i],
-                    prefix=None,
-                    suffix=None,
-                    sep=None,
-                    remove_trailing_hyphen_number=remove_trailing_hyphen_number,
-                    high_confidence_filtering=high_confidence_filtering,
-                    out_dir=out_dir,
-                    filename_prefix=filename_prefix[i],
-                )
+            format_fasta(
+                fastas[i],
+                prefix=None,
+                suffix=None,
+                sep=None,
+                remove_trailing_hyphen_number=remove_trailing_hyphen_number,
+                high_confidence_filtering=high_confidence_filtering,
+                out_dir=out_dir,
+                filename_prefix=filename_prefix[i],
+            )
 
 
 def assign_isotype(
@@ -464,9 +452,7 @@ def assign_isotype(
     def gene_correction(df: pd.DataFrame, i: str, dictionary: dict[str, str]):
         """Generalized pairwise alignment for multiple genes."""
         seq = df.loc[i, "c_sequence_alignment"].replace("-", "")
-        scores = {
-            key: aligner.align(seq, dictionary[key]).score for key in dictionary
-        }
+        scores = {key: aligner.align(seq, dictionary[key]).score for key in dictionary}
         max_score = max(scores.values())
         df.at[i, "c_call"] = ",".join(
             key for key, score in scores.items() if score == max_score
@@ -546,7 +532,7 @@ def assign_isotype(
     if filePath is None:
         raise FileNotFoundError(
             "Path to fasta file is unknown. Please specify path to "
-            + "fasta file or folder containing fasta file."
+            "fasta file or folder containing fasta file."
         )
 
     blast_out = run_blastn(
@@ -559,7 +545,7 @@ def assign_isotype(
         evalue=evalue,
         outfmt=(
             "6 qseqid sseqid pident length mismatch gapopen "
-            + "qstart qend sstart send evalue bitscore qseq sseq"
+            "qstart qend sstart send evalue bitscore qseq sseq"
         ),
         dust="no",
         additional_args=additional_args,
@@ -614,23 +600,17 @@ def assign_isotype(
         dat[col] = pd.Series(blast_out[col])
     res_blast = pd.DataFrame(dat["c_call"].replace("", "None"))
     res_blast = res_blast.fillna(value="None")
-    res_10x_sum = pd.DataFrame(
-        res_10x["c_call"].value_counts(normalize=True) * 100
-    )
+    res_10x_sum = pd.DataFrame(res_10x["c_call"].value_counts(normalize=True) * 100)
     res_10x_sum["group"] = "10X"
     res_10x_sum.columns = ["counts", "group"]
     res_10x_sum.index = res_10x_sum.index.set_names(["c_call"])
     res_10x_sum.reset_index(drop=False, inplace=True)
-    res_blast_sum = pd.DataFrame(
-        res_blast["c_call"].value_counts(normalize=True) * 100
-    )
+    res_blast_sum = pd.DataFrame(res_blast["c_call"].value_counts(normalize=True) * 100)
     res_blast_sum["group"] = "blast"
     res_blast_sum.columns = ["counts", "group"]
     res_blast_sum.index = res_blast_sum.index.set_names(["c_call"])
     res_blast_sum.reset_index(drop=False, inplace=True)
-    if (
-        correct_c_call
-    ):  # TODO: figure out if i need to set up a None correction?
+    if correct_c_call:  # TODO: figure out if i need to set up a None correction?
         logg.info("Correcting C calls \n")
         dat = _correct_c_call(dat, primers_dict=correction_dict, org=org)
         res_corrected = pd.DataFrame(dat["c_call"].replace("", "None"))
@@ -934,18 +914,16 @@ def reannotate_genes(
         if filePath is None:
             if filename_prefix[i] is not None:
                 raise FileNotFoundError(
-                    "Path to fasta file with filename prefix `{}_contig` is unknown. ".format(
-                        filename_prefix[i]
-                    )
-                    + "Please specify path to fasta file or folder containing fasta file."
+                    f"Path to fasta file with filename prefix `{filename_prefix[i]}_contig` is unknown. "
+                    "Please specify path to fasta file or folder containing fasta file."
                 )
             else:
                 raise FileNotFoundError(
                     "Path to fasta file is unknown. "
-                    + "Please specify path to fasta file or folder containing fasta file."
+                    "Please specify path to fasta file or folder containing fasta file."
                 )
 
-        logg.info(f"Processing {str(filePath)} \n")
+        logg.info(f"Processing {filePath!s} \n")
         if flavour == "original":
             assigngenes_igblast(
                 filePath,
@@ -1021,9 +999,7 @@ def reannotate_genes(
             mask_dj(data, filename_prefix, d_evalue, j_evalue)
         move_to_tmp(data, filename_prefix)
         make_all(data, filename_prefix, loci=loci)
-        rename_dandelion(
-            data, filename_prefix, ends_with="_igblast_db-pass.tsv"
-        )
+        rename_dandelion(data, filename_prefix, ends_with="_igblast_db-pass.tsv")
         update_j_multimap(data, filename_prefix)
 
 
@@ -1056,15 +1032,11 @@ def return_pass_fail_filepaths(
     if file_path is None:
         raise FileNotFoundError(
             "Path to fasta file is unknown. Please specify "
-            + "path to fasta file or folder containing fasta file."
+            "path to fasta file or folder containing fasta file."
         )
     # read the original object
-    pass_path = (
-        file_path.parent / "tmp" / (file_path.stem + "_igblast_db-pass.tsv")
-    )
-    fail_path = (
-        file_path.parent / "tmp" / (file_path.stem + "_igblast_db-fail.tsv")
-    )
+    pass_path = file_path.parent / "tmp" / (file_path.stem + "_igblast_db-pass.tsv")
+    fail_path = file_path.parent / "tmp" / (file_path.stem + "_igblast_db-fail.tsv")
     return file_path, pass_path, fail_path
 
 
@@ -1298,17 +1270,13 @@ def reassign_alleles(
         )
         if filePath is None:
             raise FileNotFoundError(
-                "Path to .tsv file for {} is unknown. ".format(data[i])
-                + "Please specify path to reannotated .tsv file or folder "
-                + "containing reannotated .tsv file."
+                f"Path to .tsv file for {data[i]} is unknown. "
+                "Please specify path to reannotated .tsv file or folder "
+                "containing reannotated .tsv file."
             )
 
-        filePath_heavy = filePath.parent / (
-            filePath.stem + "_heavy_parse-select.tsv"
-        )
-        filePath_light = filePath.parent / (
-            filePath.stem + "_light_parse-select.tsv"
-        )
+        filePath_heavy = filePath.parent / (filePath.stem + "_heavy_parse-select.tsv")
+        filePath_light = filePath.parent / (filePath.stem + "_light_parse-select.tsv")
 
         if sample_id_dictionary is not None:
             sampleNames_dict[filePath] = sample_id_dictionary[data[i]]
@@ -1333,30 +1301,16 @@ def reassign_alleles(
         logg.info("Concatenating objects")
         try:
             cmd1 = " ".join(
-                [
-                    'awk "FNR==1 && NR!=1 { while (/^sequence_id/) getline; } 1 {print}"'
-                ]
+                ['awk "FNR==1 && NR!=1 { while (/^sequence_id/) getline; } 1 {print}"']
                 + [f for f in filepathlist_heavy]
                 + [">"]
-                + [
-                    str(
-                        out_dir
-                        / (out_dir.stem + "_heavy" + informat_dict[fileformat])
-                    )
-                ]
+                + [str(out_dir / (out_dir.stem + "_heavy" + informat_dict[fileformat]))]
             )
             cmd2 = " ".join(
-                [
-                    'awk "FNR==1 && NR!=1 { while (/^sequence_id/) getline; } 1 {print}"'
-                ]
+                ['awk "FNR==1 && NR!=1 { while (/^sequence_id/) getline; } 1 {print}"']
                 + [f for f in filepathlist_light]
                 + [">"]
-                + [
-                    str(
-                        out_dir
-                        / (out_dir.stem + "_light" + informat_dict[fileformat])
-                    )
-                ]
+                + [str(out_dir / (out_dir.stem + "_light" + informat_dict[fileformat]))]
             )
             os.system(cmd1)
             os.system(cmd2)
@@ -1408,13 +1362,10 @@ def reassign_alleles(
     )
     if novel:
         try:
-            logg.info(
-                "      Running tigger-genotype with novel allele discovery."
-            )
+            logg.info("      Running tigger-genotype with novel allele discovery.")
             tigger_genotype(
                 airr_file=str(
-                    out_dir
-                    / (out_dir.stem + "_heavy" + informat_dict[fileformat])
+                    out_dir / (out_dir.stem + "_heavy" + informat_dict[fileformat])
                 ),
                 v_germline=v_germline,
                 org=org,
@@ -1426,14 +1377,12 @@ def reassign_alleles(
             )
             creategermlines(
                 airr_file=str(
-                    out_dir
-                    / (out_dir.stem + "_heavy" + fileformat_dict[fileformat])
+                    out_dir / (out_dir.stem + "_heavy" + fileformat_dict[fileformat])
                 ),
                 germline=germline,
                 org=org,
                 genotyped_fasta=str(
-                    out_dir
-                    / (out_dir.stem + "_heavy" + germline_dict[fileformat])
+                    out_dir / (out_dir.stem + "_heavy" + germline_dict[fileformat])
                 ),
                 mode="heavy",
                 db=db,
@@ -1442,8 +1391,7 @@ def reassign_alleles(
                 + additional_args["creategermlines"],
             )
             _ = load_data(
-                out_dir
-                / (out_dir.stem + "_heavy" + fileformat_passed_dict[fileformat])
+                out_dir / (out_dir.stem + "_heavy" + fileformat_passed_dict[fileformat])
             )
         except:
             try:
@@ -1453,8 +1401,7 @@ def reassign_alleles(
                 )
                 tigger_genotype(
                     airr_file=str(
-                        out_dir
-                        / (out_dir.stem + "_heavy" + informat_dict[fileformat])
+                        out_dir / (out_dir.stem + "_heavy" + informat_dict[fileformat])
                     ),
                     v_germline=v_germline,
                     org=org,
@@ -1467,17 +1414,12 @@ def reassign_alleles(
                 creategermlines(
                     airr_file=str(
                         out_dir
-                        / (
-                            out_dir.stem
-                            + "_heavy"
-                            + fileformat_dict[fileformat]
-                        )
+                        / (out_dir.stem + "_heavy" + fileformat_dict[fileformat])
                     ),
                     germline=germline,
                     org=org,
                     genotyped_fasta=str(
-                        out_dir
-                        / (out_dir.stem + "_heavy" + germline_dict[fileformat])
+                        out_dir / (out_dir.stem + "_heavy" + germline_dict[fileformat])
                     ),
                     mode="heavy",
                     db=db,
@@ -1487,11 +1429,7 @@ def reassign_alleles(
                 )
                 _ = load_data(
                     out_dir
-                    / (
-                        out_dir.stem
-                        + "_heavy"
-                        + fileformat_passed_dict[fileformat]
-                    )
+                    / (out_dir.stem + "_heavy" + fileformat_passed_dict[fileformat])
                 )
             except:
                 logg.info(
@@ -1500,13 +1438,10 @@ def reassign_alleles(
                 tigger_failed = ""
     else:
         try:
-            logg.info(
-                "      Running tigger-genotype without novel allele discovery."
-            )
+            logg.info("      Running tigger-genotype without novel allele discovery.")
             tigger_genotype(
                 airr_file=str(
-                    out_dir
-                    / (out_dir.stem + "_heavy" + informat_dict[fileformat])
+                    out_dir / (out_dir.stem + "_heavy" + informat_dict[fileformat])
                 ),
                 v_germline=v_germline,
                 org=org,
@@ -1518,14 +1453,12 @@ def reassign_alleles(
             )
             creategermlines(
                 airr_file=str(
-                    out_dir
-                    / (out_dir.stem + "_heavy" + fileformat_dict[fileformat])
+                    out_dir / (out_dir.stem + "_heavy" + fileformat_dict[fileformat])
                 ),
                 germline=germline,
                 org=org,
                 genotyped_fasta=str(
-                    out_dir
-                    / (out_dir.stem + "_heavy" + germline_dict[fileformat])
+                    out_dir / (out_dir.stem + "_heavy" + germline_dict[fileformat])
                 ),
                 mode="heavy",
                 db=db,
@@ -1536,11 +1469,7 @@ def reassign_alleles(
             _ = load_data(
                 str(
                     out_dir
-                    / (
-                        out_dir.stem
-                        + "_heavy"
-                        + fileformat_passed_dict[fileformat]
-                    )
+                    / (out_dir.stem + "_heavy" + fileformat_passed_dict[fileformat])
                 )
             )
         except:
@@ -1560,13 +1489,10 @@ def reassign_alleles(
             mode="heavy",
             db=db,
             strain=strain,
-            additional_args=["--vf", "v_call"]
-            + additional_args["creategermlines"],
+            additional_args=["--vf", "v_call"] + additional_args["creategermlines"],
         )
     creategermlines(
-        airr_file=str(
-            out_dir / (out_dir.stem + "_light" + informat_dict[fileformat])
-        ),
+        airr_file=str(out_dir / (out_dir.stem + "_light" + informat_dict[fileformat])),
         germline=germline,
         org=org,
         genotyped_fasta=None,
@@ -1587,11 +1513,7 @@ def reassign_alleles(
                     {
                         str(
                             out_dir
-                            / (
-                                out_dir.stem
-                                + "_heavy"
-                                + germpass_dict[fileformat]
-                            )
+                            / (out_dir.stem + "_heavy" + germpass_dict[fileformat])
                         )
                     }
                 )
@@ -1603,16 +1525,13 @@ def reassign_alleles(
         heavy["v_call_genotyped"] = heavy["v_call"]
     else:
         heavy = load_data(
-            out_dir
-            / (out_dir.stem + "_heavy" + fileformat_passed_dict[fileformat])
+            out_dir / (out_dir.stem + "_heavy" + fileformat_passed_dict[fileformat])
         )
 
     logg.info(
         "      For convenience, entries for light chain `v_call` are copied to `v_call_genotyped`."
     )
-    light = load_data(
-        out_dir / (out_dir.stem + "_light" + germpass_dict[fileformat])
-    )
+    light = load_data(out_dir / (out_dir.stem + "_light" + germpass_dict[fileformat]))
     light["v_call_genotyped"] = light["v_call"]
 
     sampledict = {}
@@ -1641,9 +1560,7 @@ def reassign_alleles(
             try:
                 for samp in list(set(heavy["sample_id"])):
                     res_x = heavy[(heavy["sample_id"] == samp)]
-                    V_ = [
-                        re.sub("[*][0-9][0-9]", "", v) for v in res_x["v_call"]
-                    ]
+                    V_ = [re.sub("[*][0-9][0-9]", "", v) for v in res_x["v_call"]]
                     V_g = [
                         re.sub("[*][0-9][0-9]", "", v)
                         for v in res_x["v_call_genotyped"]
@@ -1662,9 +1579,7 @@ def reassign_alleles(
                     )
                     not_in_genotype = (
                         [i in setdiff for i in V_].count(True) / len(V_) * 100,
-                        [i in setdiff for i in V_g].count(True)
-                        / len(V_g)
-                        * 100,
+                        [i in setdiff for i in V_g].count(True) / len(V_g) * 100,
                     )
                     stats = pd.DataFrame(
                         [ambiguous, not_in_genotype],
@@ -1678,21 +1593,15 @@ def reassign_alleles(
                     results.append(stats)
                 results = pd.concat(results)
                 ambiguous_table = results[results["vgroup"] == "ambiguous"]
-                not_in_genotype_table = results[
-                    results["vgroup"] == "not_in_genotype"
-                ]
+                not_in_genotype_table = results[results["vgroup"] == "not_in_genotype"]
                 ambiguous_table.reset_index(inplace=True, drop=True)
                 not_in_genotype_table.reset_index(inplace=True, drop=True)
                 # melting the dataframe
                 ambiguous_table_before = ambiguous_table.drop("after", axis=1)
-                ambiguous_table_before.rename(
-                    columns={"before": "var"}, inplace=True
-                )
+                ambiguous_table_before.rename(columns={"before": "var"}, inplace=True)
                 ambiguous_table_before["var_group"] = "before"
                 ambiguous_table_after = ambiguous_table.drop("before", axis=1)
-                ambiguous_table_after.rename(
-                    columns={"after": "var"}, inplace=True
-                )
+                ambiguous_table_after.rename(columns={"after": "var"}, inplace=True)
                 ambiguous_table_after["var_group"] = "after"
                 ambiguous_table = pd.concat(
                     [ambiguous_table_before, ambiguous_table_after]
@@ -1714,9 +1623,9 @@ def reassign_alleles(
                 not_in_genotype_table = pd.concat(
                     [not_in_genotype_table_before, not_in_genotype_table_after]
                 )
-                ambiguous_table["var_group"] = ambiguous_table[
-                    "var_group"
-                ].astype("category")
+                ambiguous_table["var_group"] = ambiguous_table["var_group"].astype(
+                    "category"
+                )
                 not_in_genotype_table["var_group"] = not_in_genotype_table[
                     "var_group"
                 ].astype("category")
@@ -1728,9 +1637,7 @@ def reassign_alleles(
                 ].cat.reorder_categories(["before", "after"])
 
                 options.figure_size = figsize
-                final_table = pd.concat(
-                    [ambiguous_table, not_in_genotype_table]
-                )
+                final_table = pd.concat([ambiguous_table, not_in_genotype_table])
                 p = (
                     ggplot(
                         final_table,
@@ -1747,9 +1654,7 @@ def reassign_alleles(
                     + theme(legend_title=element_blank())
                 )
                 if save_plot:
-                    savefile = str(
-                        out_dir / (out_dir.stem + "_reassign_alleles.pdf")
-                    )
+                    savefile = str(out_dir / (out_dir.stem + "_reassign_alleles.pdf"))
                     save_as_pdf_pages([p], filename=savefile, verbose=False)
                 if show_plot:
                     p.show()
@@ -1775,9 +1680,7 @@ def reassign_alleles(
         else:
             out_file = dat_[dat_["sample_id"] == s]
         outfilepath = filePath_dict[s]
-        write_airr(
-            out_file, outfilepath.parent / (outfilepath.stem + "_genotyped.tsv")
-        )
+        write_airr(out_file, outfilepath.parent / (outfilepath.stem + "_genotyped.tsv"))
 
 
 def create_germlines(
@@ -2021,14 +1924,13 @@ def filter_contigs(
 
     if library_type is not None:
         acceptable = lib_type(library_type)
-    else:
-        if isinstance(data, Dandelion):
-            if data.library_type is not None:
-                acceptable = lib_type(data.library_type)
-            else:
-                acceptable = None
+    elif isinstance(data, Dandelion):
+        if data.library_type is not None:
+            acceptable = lib_type(data.library_type)
         else:
             acceptable = None
+    else:
+        acceptable = None
 
     if not simple:
         if productive_only:
@@ -2086,13 +1988,13 @@ def filter_contigs(
     if len(umi_adjustment) > 0:
         dat.update({"umi_count": umi_adjustment})
 
-    poorqual = {c: "False" for c in adata_.obs_names}
-    hdoublet = {c: "False" for c in adata_.obs_names}
-    ldoublet = {c: "False" for c in adata_.obs_names}
+    poorqual = dict.fromkeys(adata_.obs_names, "False")
+    hdoublet = dict.fromkeys(adata_.obs_names, "False")
+    ldoublet = dict.fromkeys(adata_.obs_names, "False")
 
-    poorqual_ = {x: "True" for x in poor_qual}
-    hdoublet_ = {x: "True" for x in h_doublet}
-    ldoublet_ = {x: "True" for x in l_doublet}
+    poorqual_ = dict.fromkeys(poor_qual, "True")
+    hdoublet_ = dict.fromkeys(h_doublet, "True")
+    ldoublet_ = dict.fromkeys(l_doublet, "True")
 
     poorqual.update(poorqual_)
     hdoublet.update(hdoublet_)
@@ -2133,9 +2035,7 @@ def filter_contigs(
 
         # final check
         barcodes_final = list(set(_dat["cell_id"]))
-        check_dat_barcodes = list(
-            set(_dat[_dat["locus"].isin(HEAVYLONG)]["cell_id"])
-        )
+        check_dat_barcodes = list(set(_dat[_dat["locus"].isin(HEAVYLONG)]["cell_id"]))
         filter_ids2 = list(set(barcodes_final) - set(check_dat_barcodes))
         _dat = _dat[~(_dat["cell_id"].isin(filter_ids2))].copy()
 
@@ -2150,16 +2050,13 @@ def filter_contigs(
                 _dat,
                 data_path.parent / (data_path.stem + "_filtered.tsv"),
             )
-        else:
-            if save is not None:
-                if str(save).endswith(".tsv"):
-                    write_airr(_dat, save)
-                else:
-                    raise ValueError(
-                        "{} not suitable. Please provide a file name that ends with .tsv".format(
-                            str(save)
-                        )
-                    )
+        elif save is not None:
+            if str(save).endswith(".tsv"):
+                write_airr(_dat, save)
+            else:
+                raise ValueError(
+                    f"{save!s} not suitable. Please provide a file name that ends with .tsv"
+                )
     else:
         _dat = dat.copy()
 
@@ -2177,9 +2074,9 @@ def filter_contigs(
         out_dat.germline = data.germline
 
     if adata_provided:
-        bc_2 = {b: "True" for b in barcode2}
+        bc_2 = dict.fromkeys(barcode2, "True")
         if filter_contig:
-            failed2 = {b: "False" for b in failed}
+            failed2 = dict.fromkeys(failed, "False")
             bc_2.update(failed2)
         contig_check["contig_QC_pass"] = pd.Series(bc_2)
         contig_check["contig_QC_pass"] = contig_check["contig_QC_pass"].replace(
@@ -2334,29 +2231,22 @@ class FilterContigs:  # pragma: no cover
                     if len(h_p) > 1:
                         highest_umi_h = max(h_umi_p)
                         highest_umi_idx = [
-                            i
-                            for i, j in enumerate(h_umi_p)
-                            if j == highest_umi_h
+                            i for i, j in enumerate(h_umi_p) if j == highest_umi_h
                         ]
                         keep_index_h = highest_umi_idx[0]
                         keep_hc_contig = h_p[keep_index_h]
                         umi_test = [
                             int(highest_umi_h) / x < umi_foldchange_cutoff
-                            for x in h_umi_p[:keep_index_h]
-                            + h_umi_p[keep_index_h:]
+                            for x in h_umi_p[:keep_index_h] + h_umi_p[keep_index_h:]
                         ]
                         sum_umi = sum(h_umi_p)
                         if "IGHD" in h_ccall_p:
                             if all(x in ["IGHM", "IGHD"] for x in h_ccall_p):
                                 h_ccall_p_igm_count = dict(
-                                    data1[data1["c_call"] == "IGHM"][
-                                        "umi_count"
-                                    ]
+                                    data1[data1["c_call"] == "IGHM"]["umi_count"]
                                 )
                                 h_ccall_p_igd_count = dict(
-                                    data1[data1["c_call"] == "IGHD"][
-                                        "umi_count"
-                                    ]
+                                    data1[data1["c_call"] == "IGHD"]["umi_count"]
                                 )
 
                                 if len(h_ccall_p_igm_count) > 1:
@@ -2416,24 +2306,17 @@ class FilterContigs:  # pragma: no cover
                                         if j != highest_umi_h
                                     ]
                                     umi_test_ = [
-                                        highest_umi_h / x
-                                        >= umi_foldchange_cutoff
+                                        highest_umi_h / x >= umi_foldchange_cutoff
                                         for x in h_umi_p[:keep_index_h]
                                         + h_umi_p[keep_index_h:]
                                     ]
-                                    umi_test_dict = dict(
-                                        zip(other_umi_idx, umi_test_)
-                                    )
+                                    umi_test_dict = dict(zip(other_umi_idx, umi_test_))
                                     for otherindex in umi_test_dict:
                                         if umi_test_dict[otherindex]:
                                             if keep_highest_umi:
-                                                self.drop_contig.append(
-                                                    h_p[otherindex]
-                                                )
+                                                self.drop_contig.append(h_p[otherindex])
                                     # refresh
-                                    data1 = pd.DataFrame(
-                                        [data1.loc[keep_hc_contig]]
-                                    )
+                                    data1 = pd.DataFrame([data1.loc[keep_hc_contig]])
                                     h_p = list(data1["sequence_id"])
                         elif all(x in ["TRB", "TRD"] for x in h_locus_p):
                             if len(list(set(h_locus_p))) == 2:
@@ -2501,24 +2384,17 @@ class FilterContigs:  # pragma: no cover
                                         if j != highest_umi_h
                                     ]
                                     umi_test_ = [
-                                        highest_umi_h / x
-                                        >= umi_foldchange_cutoff
+                                        highest_umi_h / x >= umi_foldchange_cutoff
                                         for x in h_umi_p[:keep_index_h]
                                         + h_umi_p[keep_index_h:]
                                     ]
-                                    umi_test_dict = dict(
-                                        zip(other_umi_idx, umi_test_)
-                                    )
+                                    umi_test_dict = dict(zip(other_umi_idx, umi_test_))
                                     for otherindex in umi_test_dict:
                                         if umi_test_dict[otherindex]:
                                             if keep_highest_umi:
-                                                self.drop_contig.append(
-                                                    h_p[otherindex]
-                                                )
+                                                self.drop_contig.append(h_p[otherindex])
                                     # refresh
-                                    data1 = pd.DataFrame(
-                                        [data1.loc[keep_hc_contig]]
-                                    )
+                                    data1 = pd.DataFrame([data1.loc[keep_hc_contig]])
                                     h_p = list(data1["sequence_id"])
                         else:
                             if len(highest_umi_idx) > 1:
@@ -2541,19 +2417,13 @@ class FilterContigs:  # pragma: no cover
                                     for x in h_umi_p[:keep_index_h]
                                     + h_umi_p[keep_index_h:]
                                 ]
-                                umi_test_dict = dict(
-                                    zip(other_umi_idx, umi_test_)
-                                )
+                                umi_test_dict = dict(zip(other_umi_idx, umi_test_))
                                 for otherindex in umi_test_dict:
                                     if umi_test_dict[otherindex]:
                                         if keep_highest_umi:
-                                            self.drop_contig.append(
-                                                h_p[otherindex]
-                                            )
+                                            self.drop_contig.append(h_p[otherindex])
                                 # refresh
-                                data1 = pd.DataFrame(
-                                    [data1.loc[keep_hc_contig]]
-                                )
+                                data1 = pd.DataFrame([data1.loc[keep_hc_contig]])
                                 h_p = list(data1["sequence_id"])
             if len(self.Cell[cell]["VDJ"]["NP"]) > 0:
                 data2 = pd.DataFrame(
@@ -2579,14 +2449,11 @@ class FilterContigs:  # pragma: no cover
                         keep_index_h = highest_umi_idx[0]
                         keep_hc_contig = h_np[keep_index_h]
                         other_umi_idx = [
-                            i
-                            for i, j in enumerate(h_umi_np)
-                            if j != highest_umi_h
+                            i for i, j in enumerate(h_umi_np) if j != highest_umi_h
                         ]
                         umi_test_ = [
                             highest_umi_h / x >= umi_foldchange_cutoff
-                            for x in h_umi_np[:keep_index_h]
-                            + h_umi_np[keep_index_h:]
+                            for x in h_umi_np[:keep_index_h] + h_umi_np[keep_index_h:]
                         ]
                         umi_test_dict = dict(zip(other_umi_idx, umi_test_))
                         for otherindex in umi_test_dict:
@@ -2595,9 +2462,7 @@ class FilterContigs:  # pragma: no cover
                         # refresh
                         data2 = pd.DataFrame([data2.loc[keep_hc_contig]])
                         h_np = list(data2["sequence_id"])
-                        h_umi_np = [
-                            int(x) for x in pd.to_numeric(data2["umi_count"])
-                        ]
+                        h_umi_np = [int(x) for x in pd.to_numeric(data2["umi_count"])]
             if len(self.Cell[cell]["VJ"]["P"]) > 0:
                 data3 = pd.DataFrame(
                     [
@@ -2631,16 +2496,13 @@ class FilterContigs:  # pragma: no cover
                     if len(l_p) > 1:
                         highest_umi_l = max(l_umi_p)
                         highest_umi_l_idx = [
-                            i
-                            for i, j in enumerate(l_umi_p)
-                            if j == highest_umi_l
+                            i for i, j in enumerate(l_umi_p) if j == highest_umi_l
                         ]
                         keep_index_l = highest_umi_l_idx[0]
                         keep_lc_contig = l_p[keep_index_l]
                         umi_test = [
                             highest_umi_l / x < umi_foldchange_cutoff
-                            for x in l_umi_p[:keep_index_l]
-                            + l_umi_p[keep_index_l:]
+                            for x in l_umi_p[:keep_index_l] + l_umi_p[keep_index_l:]
                         ]
                         sum_umi = sum(l_umi_p)
                         if len(highest_umi_l_idx) > 1:
@@ -2654,18 +2516,13 @@ class FilterContigs:  # pragma: no cover
                                 self.l_doublet.append(cell)
                         if len(highest_umi_l_idx) == 1:
                             other_umi_idx_l = [
-                                i
-                                for i, j in enumerate(l_umi_p)
-                                if j != highest_umi_l
+                                i for i, j in enumerate(l_umi_p) if j != highest_umi_l
                             ]
                             umi_test_l = [
                                 highest_umi_l / x >= umi_foldchange_cutoff
-                                for x in l_umi_p[:keep_index_l]
-                                + l_umi_p[keep_index_l:]
+                                for x in l_umi_p[:keep_index_l] + l_umi_p[keep_index_l:]
                             ]
-                            umi_test_dict_l = dict(
-                                zip(other_umi_idx_l, umi_test_l)
-                            )
+                            umi_test_dict_l = dict(zip(other_umi_idx_l, umi_test_l))
                             for otherindex in umi_test_dict_l:
                                 if umi_test_dict_l[otherindex]:
                                     if keep_highest_umi:
@@ -2700,8 +2557,7 @@ class FilterContigs:  # pragma: no cover
                     ]
                     umi_test_l = [
                         highest_umi_l / x >= umi_foldchange_cutoff
-                        for x in l_umi_np[:keep_index_l]
-                        + l_umi_np[keep_index_l:]
+                        for x in l_umi_np[:keep_index_l] + l_umi_np[keep_index_l:]
                     ]
                     if len(highest_umi_l_idx) == 1:
                         umi_test_dict_l = dict(zip(other_umi_idx_l, umi_test_l))
@@ -3116,8 +2972,7 @@ class FilterContigsLite:  # pragma: no cover
                                 keep_hc_contig = h_p[keep_index_h]
                                 data1[keep_hc_contig, "umi_count"] = int(
                                     np.sum(
-                                        h_umi_p[:keep_index_h]
-                                        + h_umi_p[keep_index_h:]
+                                        h_umi_p[:keep_index_h] + h_umi_p[keep_index_h:]
                                     )
                                 )
                                 self.umi_adjustment.update(
@@ -3131,13 +2986,10 @@ class FilterContigsLite:  # pragma: no cover
                                     }
                                 )
                                 # refresh
-                                data1 = pd.DataFrame(
-                                    [data1.loc[keep_hc_contig]]
-                                )
+                                data1 = pd.DataFrame([data1.loc[keep_hc_contig]])
                                 h_p = list(data1["sequence_id"])
                                 h_umi_p = [
-                                    int(x)
-                                    for x in pd.to_numeric(data1["umi_count"])
+                                    int(x) for x in pd.to_numeric(data1["umi_count"])
                                 ]
             if len(self.Cell[cell]["VDJ"]["NP"]) > 0:
                 data2 = pd.DataFrame(
@@ -3175,9 +3027,7 @@ class FilterContigsLite:  # pragma: no cover
                         if len(list(set(l_seq_p))) == 1:
                             highest_umi_l = max(l_umi_p)
                             highest_umi_l_idx = [
-                                i
-                                for i, j in enumerate(l_umi_p)
-                                if j == highest_umi_l
+                                i for i, j in enumerate(l_umi_p) if j == highest_umi_l
                             ]
                             keep_index_l = highest_umi_l_idx[0]
                             self.drop_contig.append(
@@ -3185,10 +3035,7 @@ class FilterContigsLite:  # pragma: no cover
                             )
                             keep_lc_contig = l_p[keep_index_l]
                             data3.at[keep_lc_contig, "umi_count"] = int(
-                                np.sum(
-                                    l_umi_p[:keep_index_l]
-                                    + l_umi_p[keep_index_l:]
-                                )
+                                np.sum(l_umi_p[:keep_index_l] + l_umi_p[keep_index_l:])
                             )
                             self.umi_adjustment.update(
                                 {
@@ -3204,8 +3051,7 @@ class FilterContigsLite:  # pragma: no cover
                             data3 = pd.DataFrame([data3.loc[keep_lc_contig]])
                             l_p = list(data3["sequence_id"])
                             l_umi_p = [
-                                int(x)
-                                for x in pd.to_numeric(data3["umi_count"])
+                                int(x) for x in pd.to_numeric(data3["umi_count"])
                             ]
             if len(self.Cell[cell]["VJ"]["NP"]) > 0:
                 data4 = pd.DataFrame(
@@ -3522,7 +3368,7 @@ def run_igblastn(
             ]
         cmd += additional_args
         logg.info("Running command: %s\n" % (" ".join(cmd)))
-        run(cmd, env=env)  # logs are printed to terminal
+        run(cmd, check=False, env=env)  # logs are printed to terminal
 
 
 def assign_DJ(
@@ -3537,7 +3383,7 @@ def assign_DJ(
     word_size: int | None = None,
     outfmt: str = (
         "6 qseqid sseqid pident length mismatch gapopen "
-        + "qstart qend sstart send evalue bitscore qseq sseq"
+        "qstart qend sstart send evalue bitscore qseq sseq"
     ),
     filename_prefix: str | None = None,
     overwrite: bool = False,
@@ -3645,9 +3491,7 @@ def assign_DJ(
     transfer_assignment(
         passfile=passfile,
         failfile=failfile,
-        blast_result=blast_out.drop_duplicates(
-            subset="sequence_id", keep="first"
-        ),
+        blast_result=blast_out.drop_duplicates(subset="sequence_id", keep="first"),
         eval_threshold=evalue,
         call=call,
         overwrite=overwrite,
@@ -3664,7 +3508,7 @@ def run_blastn(
     evalue: float = 1e-4,
     outfmt: str = (
         "6 qseqid sseqid pident length mismatch gapopen "
-        + "qstart qend sstart send evalue bitscore qseq sseq"
+        "qstart qend sstart send evalue bitscore qseq sseq"
     ),
     dust: str | None = None,
     word_size: int | None = None,
@@ -3753,9 +3597,7 @@ def run_blastn(
         if db == "ogrdb":
             _strain = "_" + strain if strain is not None else ""
             bdb = (
-                bdb
-                / "database"
-                / (db + "_" + org + _strain + "_" + loci + "_" + call)
+                bdb / "database" / (db + "_" + org + _strain + "_" + loci + "_" + call)
             )
         else:
             bdb = bdb / "database" / (db + "_" + org + "_" + loci + "_" + call)
@@ -3763,13 +3605,8 @@ def run_blastn(
         env, bdb, fasta = set_blast_env(blast_db=database, input_file=fasta)
         if database is None:
             bdb = bdb / org / (org + "_BCR_C.fasta")
-        else:
-            if not bdb.stem.endswith("_" + loci + "_" + call):
-                bdb = (
-                    bdb
-                    / "database"
-                    / (db + "_" + org + "_" + loci + "_" + call)
-                )
+        elif not bdb.stem.endswith("_" + loci + "_" + call):
+            bdb = bdb / "database" / (db + "_" + org + "_" + loci + "_" + call)
     cmd = [
         "blastn",
         "-db",
@@ -3791,7 +3628,7 @@ def run_blastn(
     blast_out = fasta.parent / "tmp" / (fasta.stem + "_" + call + "_blast.tsv")
     logg.info("Running command: %s\n" % (" ".join(cmd)))
     with open(blast_out, "w") as out:
-        run(cmd, stdout=out, env=env)
+        run(cmd, check=False, stdout=out, env=env)
     try:
         dat = pd.read_csv(blast_out, sep="\t", header=None)
         dat.columns = [
@@ -3904,9 +3741,9 @@ def transfer_assignment(
             if call + "_score" in db_pass:
                 db_pass[call + "_score_igblastn"] = pd.Series(db_pass_scores)
             db_pass[call + "_call_igblastn"] = pd.Series(db_pass_call)
-            db_pass[call + "_call_igblastn"] = db_pass[
-                call + "_call_igblastn"
-            ].fillna(value="")
+            db_pass[call + "_call_igblastn"] = db_pass[call + "_call_igblastn"].fillna(
+                value=""
+            )
             for col in blast_result:
                 if col not in ["sequence_id", "cell_id"]:
                     db_pass[col + "_blastn"] = pd.Series(blast_result[col])
@@ -3915,9 +3752,9 @@ def transfer_assignment(
                         call + "_sequence_alignment",
                         call + "_germline_alignment",
                     ]:
-                        db_pass[col + "_blastn"] = db_pass[
-                            col + "_blastn"
-                        ].fillna(value="")
+                        db_pass[col + "_blastn"] = db_pass[col + "_blastn"].fillna(
+                            value=""
+                        )
             db_pass[call + "_source"] = ""
             if overwrite:
                 for i in db_pass["sequence_id"]:
@@ -3954,68 +3791,55 @@ def transfer_assignment(
                                 ):
                                     if present(eval1):
                                         if eval1 > eval2:
-                                            db_pass.at[i, call + "_call"] = (
+                                            db_pass.at[i, call + "_call"] = db_pass.at[
+                                                i, call + "_call_blastn"
+                                            ]
+                                            db_pass.at[i, call + "_sequence_start"] = (
                                                 db_pass.at[
-                                                    i, call + "_call_blastn"
+                                                    i,
+                                                    call + "_sequence_start_blastn",
                                                 ]
                                             )
+                                            db_pass.at[i, call + "_sequence_end"] = (
+                                                db_pass.at[
+                                                    i, call + "_sequence_end_blastn"
+                                                ]
+                                            )
+                                            db_pass.at[i, call + "_germline_start"] = (
+                                                db_pass.at[
+                                                    i,
+                                                    call + "_germline_start_blastn",
+                                                ]
+                                            )
+                                            db_pass.at[i, call + "_germline_end"] = (
+                                                db_pass.at[
+                                                    i, call + "_germline_end_blastn"
+                                                ]
+                                            )
+                                            db_pass.at[i, call + "_source"] = "blastn"
+                                    elif present(eval2):
+                                        db_pass.at[i, call + "_call"] = db_pass.at[
+                                            i, call + "_call_blastn"
+                                        ]
+                                        db_pass.at[i, call + "_sequence_start"] = (
                                             db_pass.at[
-                                                i, call + "_sequence_start"
-                                            ] = db_pass.at[
                                                 i,
                                                 call + "_sequence_start_blastn",
                                             ]
+                                        )
+                                        db_pass.at[i, call + "_sequence_end"] = (
+                                            db_pass.at[i, call + "_sequence_end_blastn"]
+                                        )
+                                        db_pass.at[i, call + "_germline_start"] = (
                                             db_pass.at[
-                                                i, call + "_sequence_end"
-                                            ] = db_pass.at[
-                                                i, call + "_sequence_end_blastn"
-                                            ]
-                                            db_pass.at[
-                                                i, call + "_germline_start"
-                                            ] = db_pass.at[
                                                 i,
                                                 call + "_germline_start_blastn",
                                             ]
-                                            db_pass.at[
-                                                i, call + "_germline_end"
-                                            ] = db_pass.at[
-                                                i, call + "_germline_end_blastn"
-                                            ]
-                                            db_pass.at[i, call + "_source"] = (
-                                                "blastn"
-                                            )
-                                    else:
-                                        if present(eval2):
-                                            db_pass.at[i, call + "_call"] = (
-                                                db_pass.at[
-                                                    i, call + "_call_blastn"
-                                                ]
-                                            )
-                                            db_pass.at[
-                                                i, call + "_sequence_start"
-                                            ] = db_pass.at[
-                                                i,
-                                                call + "_sequence_start_blastn",
-                                            ]
-                                            db_pass.at[
-                                                i, call + "_sequence_end"
-                                            ] = db_pass.at[
-                                                i, call + "_sequence_end_blastn"
-                                            ]
-                                            db_pass.at[
-                                                i, call + "_germline_start"
-                                            ] = db_pass.at[
-                                                i,
-                                                call + "_germline_start_blastn",
-                                            ]
-                                            db_pass.at[
-                                                i, call + "_germline_end"
-                                            ] = db_pass.at[
-                                                i, call + "_germline_end_blastn"
-                                            ]
-                                            db_pass.at[i, call + "_source"] = (
-                                                "blastn"
-                                            )
+                                        )
+                                        db_pass.at[i, call + "_germline_end"] = (
+                                            db_pass.at[i, call + "_germline_end_blastn"]
+                                        )
+                                        db_pass.at[i, call + "_source"] = "blastn"
                                 else:
                                     db_pass.at[i, call + "_source"] = "10x"
                                     db_pass.at[i, call + "_call"] = db_pass.at[
@@ -4025,73 +3849,49 @@ def transfer_assignment(
                                         if present(db_pass.loc[i, "junction"]):
                                             if (
                                                 db_pass.loc[i, "junction"]
-                                                != db_pass.loc[
+                                                != db_pass.loc[i, "junction_10x"]
+                                            ):
+                                                db_pass.at[i, "junction"] = db_pass.at[
                                                     i, "junction_10x"
                                                 ]
-                                            ):
-                                                db_pass.at[i, "junction"] = (
-                                                    db_pass.at[
-                                                        i, "junction_10x"
-                                                    ]
-                                                )
                                                 db_pass.at[i, "junction_aa"] = (
-                                                    db_pass.at[
-                                                        i, "junction_10x_aa"
-                                                    ]
+                                                    db_pass.at[i, "junction_10x_aa"]
                                                 )
-                        else:
-                            if present(eval1):
-                                if eval1 > eval2:
-                                    db_pass.at[i, call + "_call"] = db_pass.at[
-                                        i, call + "_call_blastn"
-                                    ]
-                                    db_pass.at[i, call + "_sequence_start"] = (
-                                        db_pass.at[
-                                            i, call + "_sequence_start_blastn"
-                                        ]
-                                    )
-                                    db_pass.at[i, call + "_sequence_end"] = (
-                                        db_pass.at[
-                                            i, call + "_sequence_end_blastn"
-                                        ]
-                                    )
-                                    db_pass.at[i, call + "_germline_start"] = (
-                                        db_pass.at[
-                                            i, call + "_germline_start_blastn"
-                                        ]
-                                    )
-                                    db_pass.at[i, call + "_germline_end"] = (
-                                        db_pass.at[
-                                            i, call + "_germline_end_blastn"
-                                        ]
-                                    )
-                                    db_pass.at[i, call + "_source"] = "blastn"
-                            else:
-                                if present(eval2):
-                                    db_pass.at[i, call + "_call"] = db_pass.at[
-                                        i, call + "_call_blastn"
-                                    ]
-                                    db_pass.at[i, call + "_sequence_start"] = (
-                                        db_pass.at[
-                                            i, call + "_sequence_start_blastn"
-                                        ]
-                                    )
-                                    db_pass.at[i, call + "_sequence_end"] = (
-                                        db_pass.at[
-                                            i, call + "_sequence_end_blastn"
-                                        ]
-                                    )
-                                    db_pass.at[i, call + "_germline_start"] = (
-                                        db_pass.at[
-                                            i, call + "_germline_start_blastn"
-                                        ]
-                                    )
-                                    db_pass.at[i, call + "_germline_end"] = (
-                                        db_pass.at[
-                                            i, call + "_germline_end_blastn"
-                                        ]
-                                    )
-                                    db_pass.at[i, call + "_source"] = "blastn"
+                        elif present(eval1):
+                            if eval1 > eval2:
+                                db_pass.at[i, call + "_call"] = db_pass.at[
+                                    i, call + "_call_blastn"
+                                ]
+                                db_pass.at[i, call + "_sequence_start"] = db_pass.at[
+                                    i, call + "_sequence_start_blastn"
+                                ]
+                                db_pass.at[i, call + "_sequence_end"] = db_pass.at[
+                                    i, call + "_sequence_end_blastn"
+                                ]
+                                db_pass.at[i, call + "_germline_start"] = db_pass.at[
+                                    i, call + "_germline_start_blastn"
+                                ]
+                                db_pass.at[i, call + "_germline_end"] = db_pass.at[
+                                    i, call + "_germline_end_blastn"
+                                ]
+                                db_pass.at[i, call + "_source"] = "blastn"
+                        elif present(eval2):
+                            db_pass.at[i, call + "_call"] = db_pass.at[
+                                i, call + "_call_blastn"
+                            ]
+                            db_pass.at[i, call + "_sequence_start"] = db_pass.at[
+                                i, call + "_sequence_start_blastn"
+                            ]
+                            db_pass.at[i, call + "_sequence_end"] = db_pass.at[
+                                i, call + "_sequence_end_blastn"
+                            ]
+                            db_pass.at[i, call + "_germline_start"] = db_pass.at[
+                                i, call + "_germline_start_blastn"
+                            ]
+                            db_pass.at[i, call + "_germline_end"] = db_pass.at[
+                                i, call + "_germline_end_blastn"
+                            ]
+                            db_pass.at[i, call + "_source"] = "blastn"
 
                 vend = db_pass["v_sequence_end"]
                 dstart = db_pass["d_sequence_start"]
@@ -4101,22 +3901,14 @@ def transfer_assignment(
                 np1 = [
                     str(int(n)) if n >= 0 else ""
                     for n in [
-                        (
-                            (d - v) - 1
-                            if pd.notnull(v) and pd.notnull(d)
-                            else np.nan
-                        )
+                        ((d - v) - 1 if pd.notnull(v) and pd.notnull(d) else np.nan)
                         for v, d in zip(vend, dstart)
                     ]
                 ]
                 np2 = [
                     str(int(n)) if n >= 0 else ""
                     for n in [
-                        (
-                            (j - d) - 1
-                            if pd.notnull(j) and pd.notnull(d)
-                            else np.nan
-                        )
+                        ((j - d) - 1 if pd.notnull(j) and pd.notnull(d) else np.nan)
                         for d, j in zip(dend, jstart)
                     ]
                 ]
@@ -4149,9 +3941,9 @@ def transfer_assignment(
             if call + "_score" in db_fail:
                 db_fail[call + "_score_igblastn"] = pd.Series(db_fail_scores)
             db_fail[call + "_call_igblastn"] = pd.Series(db_fail_call)
-            db_fail[call + "_call_igblastn"] = db_fail[
-                call + "_call_igblastn"
-            ].fillna(value="")
+            db_fail[call + "_call_igblastn"] = db_fail[call + "_call_igblastn"].fillna(
+                value=""
+            )
             for col in blast_result:
                 if col not in ["sequence_id", "cell_id"]:
                     db_fail[col + "_blastn"] = pd.Series(blast_result[col])
@@ -4160,9 +3952,9 @@ def transfer_assignment(
                         call + "_sequence_alignment",
                         call + "_germline_alignment",
                     ]:
-                        db_fail[col + "_blastn"] = db_fail[
-                            col + "_blastn"
-                        ].fillna(value="")
+                        db_fail[col + "_blastn"] = db_fail[col + "_blastn"].fillna(
+                            value=""
+                        )
             db_fail[call + "_source"] = ""
             if overwrite:
                 for i in db_fail["sequence_id"]:
@@ -4199,68 +3991,55 @@ def transfer_assignment(
                                 ):
                                     if present(eval1):
                                         if eval1 > eval2:
-                                            db_fail.at[i, call + "_call"] = (
+                                            db_fail.at[i, call + "_call"] = db_fail.at[
+                                                i, call + "_call_blastn"
+                                            ]
+                                            db_fail.at[i, call + "_sequence_start"] = (
                                                 db_fail.at[
-                                                    i, call + "_call_blastn"
+                                                    i,
+                                                    call + "_sequence_start_blastn",
                                                 ]
                                             )
+                                            db_fail.at[i, call + "_sequence_end"] = (
+                                                db_fail.at[
+                                                    i, call + "_sequence_end_blastn"
+                                                ]
+                                            )
+                                            db_fail.at[i, call + "_germline_start"] = (
+                                                db_fail.at[
+                                                    i,
+                                                    call + "_germline_start_blastn",
+                                                ]
+                                            )
+                                            db_fail.at[i, call + "_germline_end"] = (
+                                                db_fail.at[
+                                                    i, call + "_germline_end_blastn"
+                                                ]
+                                            )
+                                            db_fail.at[i, call + "_source"] = "blastn"
+                                    elif present(eval2):
+                                        db_fail.at[i, call + "_call"] = db_fail.at[
+                                            i, call + "_call_blastn"
+                                        ]
+                                        db_fail.at[i, call + "_sequence_start"] = (
                                             db_fail.at[
-                                                i, call + "_sequence_start"
-                                            ] = db_fail.at[
                                                 i,
                                                 call + "_sequence_start_blastn",
                                             ]
+                                        )
+                                        db_fail.at[i, call + "_sequence_end"] = (
+                                            db_fail.at[i, call + "_sequence_end_blastn"]
+                                        )
+                                        db_fail.at[i, call + "_germline_start"] = (
                                             db_fail.at[
-                                                i, call + "_sequence_end"
-                                            ] = db_fail.at[
-                                                i, call + "_sequence_end_blastn"
-                                            ]
-                                            db_fail.at[
-                                                i, call + "_germline_start"
-                                            ] = db_fail.at[
                                                 i,
                                                 call + "_germline_start_blastn",
                                             ]
-                                            db_fail.at[
-                                                i, call + "_germline_end"
-                                            ] = db_fail.at[
-                                                i, call + "_germline_end_blastn"
-                                            ]
-                                            db_fail.at[i, call + "_source"] = (
-                                                "blastn"
-                                            )
-                                    else:
-                                        if present(eval2):
-                                            db_fail.at[i, call + "_call"] = (
-                                                db_fail.at[
-                                                    i, call + "_call_blastn"
-                                                ]
-                                            )
-                                            db_fail.at[
-                                                i, call + "_sequence_start"
-                                            ] = db_fail.at[
-                                                i,
-                                                call + "_sequence_start_blastn",
-                                            ]
-                                            db_fail.at[
-                                                i, call + "_sequence_end"
-                                            ] = db_fail.at[
-                                                i, call + "_sequence_end_blastn"
-                                            ]
-                                            db_fail.at[
-                                                i, call + "_germline_start"
-                                            ] = db_fail.at[
-                                                i,
-                                                call + "_germline_start_blastn",
-                                            ]
-                                            db_fail.at[
-                                                i, call + "_germline_end"
-                                            ] = db_fail.at[
-                                                i, call + "_germline_end_blastn"
-                                            ]
-                                            db_fail.at[i, call + "_source"] = (
-                                                "blastn"
-                                            )
+                                        )
+                                        db_fail.at[i, call + "_germline_end"] = (
+                                            db_fail.at[i, call + "_germline_end_blastn"]
+                                        )
+                                        db_fail.at[i, call + "_source"] = "blastn"
                                 else:
                                     db_fail.at[i, call + "_source"] = "10x"
                                     db_fail.at[i, call + "_call"] = db_fail.at[
@@ -4270,73 +4049,49 @@ def transfer_assignment(
                                         if present(db_fail.loc[i, "junction"]):
                                             if (
                                                 db_fail.loc[i, "junction"]
-                                                != db_fail.loc[
+                                                != db_fail.loc[i, "junction_10x"]
+                                            ):
+                                                db_fail.at[i, "junction"] = db_fail.at[
                                                     i, "junction_10x"
                                                 ]
-                                            ):
-                                                db_fail.at[i, "junction"] = (
-                                                    db_fail.at[
-                                                        i, "junction_10x"
-                                                    ]
-                                                )
                                                 db_fail.at[i, "junction_aa"] = (
-                                                    db_fail.at[
-                                                        i, "junction_10x_aa"
-                                                    ]
+                                                    db_fail.at[i, "junction_10x_aa"]
                                                 )
-                        else:
-                            if present(eval1):
-                                if eval1 > eval2:
-                                    db_fail.at[i, call + "_call"] = db_fail.at[
-                                        i, call + "_call_blastn"
-                                    ]
-                                    db_fail.at[i, call + "_sequence_start"] = (
-                                        db_fail.at[
-                                            i, call + "_sequence_start_blastn"
-                                        ]
-                                    )
-                                    db_fail.at[i, call + "_sequence_end"] = (
-                                        db_fail.at[
-                                            i, call + "_sequence_end_blastn"
-                                        ]
-                                    )
-                                    db_fail.at[i, call + "_germline_start"] = (
-                                        db_fail.at[
-                                            i, call + "_germline_start_blastn"
-                                        ]
-                                    )
-                                    db_fail.at[i, call + "_germline_end"] = (
-                                        db_fail.at[
-                                            i, call + "_germline_end_blastn"
-                                        ]
-                                    )
-                                    db_fail.at[i, call + "_source"] = "blastn"
-                            else:
-                                if present(eval2):
-                                    db_fail.at[i, call + "_call"] = db_fail.at[
-                                        i, call + "_call_blastn"
-                                    ]
-                                    db_fail.at[i, call + "_sequence_start"] = (
-                                        db_fail.at[
-                                            i, call + "_sequence_start_blastn"
-                                        ]
-                                    )
-                                    db_fail.at[i, call + "_sequence_end"] = (
-                                        db_fail.at[
-                                            i, call + "_sequence_end_blastn"
-                                        ]
-                                    )
-                                    db_fail.at[i, call + "_germline_start"] = (
-                                        db_fail.at[
-                                            i, call + "_germline_start_blastn"
-                                        ]
-                                    )
-                                    db_fail.at[i, call + "_germline_end"] = (
-                                        db_fail.at[
-                                            i, call + "_germline_end_blastn"
-                                        ]
-                                    )
-                                    db_fail.at[i, call + "_source"] = "blastn"
+                        elif present(eval1):
+                            if eval1 > eval2:
+                                db_fail.at[i, call + "_call"] = db_fail.at[
+                                    i, call + "_call_blastn"
+                                ]
+                                db_fail.at[i, call + "_sequence_start"] = db_fail.at[
+                                    i, call + "_sequence_start_blastn"
+                                ]
+                                db_fail.at[i, call + "_sequence_end"] = db_fail.at[
+                                    i, call + "_sequence_end_blastn"
+                                ]
+                                db_fail.at[i, call + "_germline_start"] = db_fail.at[
+                                    i, call + "_germline_start_blastn"
+                                ]
+                                db_fail.at[i, call + "_germline_end"] = db_fail.at[
+                                    i, call + "_germline_end_blastn"
+                                ]
+                                db_fail.at[i, call + "_source"] = "blastn"
+                        elif present(eval2):
+                            db_fail.at[i, call + "_call"] = db_fail.at[
+                                i, call + "_call_blastn"
+                            ]
+                            db_fail.at[i, call + "_sequence_start"] = db_fail.at[
+                                i, call + "_sequence_start_blastn"
+                            ]
+                            db_fail.at[i, call + "_sequence_end"] = db_fail.at[
+                                i, call + "_sequence_end_blastn"
+                            ]
+                            db_fail.at[i, call + "_germline_start"] = db_fail.at[
+                                i, call + "_germline_start_blastn"
+                            ]
+                            db_fail.at[i, call + "_germline_end"] = db_fail.at[
+                                i, call + "_germline_end_blastn"
+                            ]
+                            db_fail.at[i, call + "_source"] = "blastn"
 
                 vend = db_fail["v_sequence_end"]
                 dstart = db_fail["d_sequence_start"]
@@ -4346,22 +4101,14 @@ def transfer_assignment(
                 np1 = [
                     str(int(n)) if n >= 0 else ""
                     for n in [
-                        (
-                            (d - v) - 1
-                            if pd.notnull(v) and pd.notnull(d)
-                            else np.nan
-                        )
+                        ((d - v) - 1 if pd.notnull(v) and pd.notnull(d) else np.nan)
                         for v, d in zip(vend, dstart)
                     ]
                 ]
                 np2 = [
                     str(int(n)) if n >= 0 else ""
                     for n in [
-                        (
-                            (j - d) - 1
-                            if pd.notnull(j) and pd.notnull(d)
-                            else np.nan
-                        )
+                        ((j - d) - 1 if pd.notnull(j) and pd.notnull(d) else np.nan)
                         for d, j in zip(dend, jstart)
                     ]
                 ]
@@ -4487,14 +4234,13 @@ def check_contigs(
 
     if library_type is not None:
         acceptable = lib_type(library_type)
-    else:
-        if isinstance(data, Dandelion):
-            if data.library_type is not None:
-                acceptable = lib_type(data.library_type)
-            else:
-                acceptable = None
+    elif isinstance(data, Dandelion):
+        if data.library_type is not None:
+            acceptable = lib_type(data.library_type)
         else:
             acceptable = None
+    else:
+        acceptable = None
 
     if productive_only:
         dat = dat_[dat_["productive"].isin(TRUES)].copy()
@@ -4541,13 +4287,13 @@ def check_contigs(
             if k in dat.index:
                 dat.at[k, "umi_count"] = v
 
-    ambi = {c: "F" for c in dat_.sequence_id}
-    ambiguous_ = {x: "T" for x in ambigous}
+    ambi = dict.fromkeys(dat_.sequence_id, "F")
+    ambiguous_ = dict.fromkeys(ambigous, "T")
     ambi.update(ambiguous_)
     dat["ambiguous"] = pd.Series(ambi)
 
-    extr = {c: "F" for c in dat_.sequence_id}
-    extra_ = {x: "T" for x in extra}
+    extr = dict.fromkeys(dat_.sequence_id, "F")
+    extra_ = dict.fromkeys(extra, "T")
     extr.update(extra_)
     dat["extra"] = pd.Series(extr)
 
@@ -4560,19 +4306,14 @@ def check_contigs(
         )
     if os.path.isfile(str(data)):
         data_path = Path(data)
-        write_airr(
-            dat, data_path.parent / "{}_checked.tsv".format(data_path.stem)
-        )
-    else:
-        if save is not None:
-            if save.endswith(".tsv"):
-                write_airr(dat, str(save))
-            else:
-                raise ValueError(
-                    "{} not suitable. Please provide a file name that ends with .tsv".format(
-                        str(save)
-                    )
-                )
+        write_airr(dat, data_path.parent / f"{data_path.stem}_checked.tsv")
+    elif save is not None:
+        if save.endswith(".tsv"):
+            write_airr(dat, str(save))
+        else:
+            raise ValueError(
+                f"{save!s} not suitable. Please provide a file name that ends with .tsv"
+            )
 
     if productive_only:
         for i, row in dat.iterrows():
@@ -4725,15 +4466,12 @@ class MarkAmbiguousContigs:
                     if len(vdj_p) > 1:
                         if allow_exceptions:
                             if "IGHD" in vdj_ccall_p:
-                                if all(
-                                    x in ["IGHM", "IGHD"] for x in vdj_ccall_p
-                                ):
+                                if all(x in ["IGHM", "IGHD"] for x in vdj_ccall_p):
                                     if len(list(set(vdj_ccall_p))) == 2:
                                         # the v and j should be the same in order to keep as exception
                                         vdj_vcall_p = (
                                             list(data1["v_call_genotyped"])
-                                            if "v_call_genotyped"
-                                            in data1.columns
+                                            if "v_call_genotyped" in data1.columns
                                             else list(data1["v_call"])
                                         )
                                         vdj_jcall_p = list(data1["j_call"])
@@ -4743,24 +4481,24 @@ class MarkAmbiguousContigs:
                                             == 1
                                         ):
                                             vdj_ccall_p_igm_count = dict(
-                                                data1[
-                                                    data1["c_call"] == "IGHM"
-                                                ]["umi_count"]
+                                                data1[data1["c_call"] == "IGHM"][
+                                                    "umi_count"
+                                                ]
                                             )
                                             vdj_ccall_c_igm_count = dict(
-                                                data1[
-                                                    data1["c_call"] == "IGHM"
-                                                ]["consensus_count"]
+                                                data1[data1["c_call"] == "IGHM"][
+                                                    "consensus_count"
+                                                ]
                                             )
                                             vdj_ccall_p_igd_count = dict(
-                                                data1[
-                                                    data1["c_call"] == "IGHD"
-                                                ]["umi_count"]
+                                                data1[data1["c_call"] == "IGHD"][
+                                                    "umi_count"
+                                                ]
                                             )
                                             vdj_ccall_c_igd_count = dict(
-                                                data1[
-                                                    data1["c_call"] == "IGHD"
-                                                ]["consensus_count"]
+                                                data1[data1["c_call"] == "IGHD"][
+                                                    "consensus_count"
+                                                ]
                                             )
                                         else:
                                             (
@@ -4769,9 +4507,7 @@ class MarkAmbiguousContigs:
                                                 vdj_ccall_c_igm_count,
                                                 vdj_ccall_c_igd_count,
                                             ) = ({}, {}, {}, {})
-                                            vdj_ccall_p_count = dict(
-                                                data1["umi_count"]
-                                            )
+                                            vdj_ccall_p_count = dict(data1["umi_count"])
                                             vdj_ccall_c_count = dict(
                                                 data1["consensus_count"]
                                             )
@@ -4847,14 +4583,10 @@ class MarkAmbiguousContigs:
                                     if "extra_vdj" not in locals():
                                         extra_vdj = extra_igm + extra_igd
                                     if "ambiguous_vdj" not in locals():
-                                        ambiguous_vdj = (
-                                            ambiguous_igm + ambiguous_igd
-                                        )
+                                        ambiguous_vdj = ambiguous_igm + ambiguous_igd
                                 else:
                                     vdj_ccall_p_count = dict(data1["umi_count"])
-                                    vdj_ccall_c_count = dict(
-                                        data1["consensus_count"]
-                                    )
+                                    vdj_ccall_c_count = dict(data1["consensus_count"])
                                     if len(vdj_ccall_p_count) > 1:
                                         (
                                             vdj_p,
@@ -4876,14 +4608,10 @@ class MarkAmbiguousContigs:
                             elif all(x in ["TRB", "TRD"] for x in vdj_locus_p):
                                 if len(list(set(vdj_locus_p))) == 2:
                                     vdj_locus_p_trb_count = dict(
-                                        data1[data1["locus"] == "TRB"][
-                                            "umi_count"
-                                        ]
+                                        data1[data1["locus"] == "TRB"]["umi_count"]
                                     )
                                     vdj_locus_p_trd_count = dict(
-                                        data1[data1["locus"] == "TRD"][
-                                            "umi_count"
-                                        ]
+                                        data1[data1["locus"] == "TRD"]["umi_count"]
                                     )
                                     vdj_locus_c_trb_count = dict(
                                         data1[data1["locus"] == "TRB"][
@@ -4935,14 +4663,10 @@ class MarkAmbiguousContigs:
 
                                     vdj_p = keep_trb + keep_trd
                                     extra_vdj = extra_trb + extra_trd
-                                    ambiguous_vdj = (
-                                        ambiguous_trb + ambiguous_trd
-                                    )
+                                    ambiguous_vdj = ambiguous_trb + ambiguous_trd
                                 else:
                                     vdj_ccall_p_count = dict(data1["umi_count"])
-                                    vdj_ccall_c_count = dict(
-                                        data1["consensus_count"]
-                                    )
+                                    vdj_ccall_c_count = dict(data1["consensus_count"])
                                     if len(vdj_ccall_p_count) > 1:
                                         (
                                             vdj_p,
@@ -4963,9 +4687,7 @@ class MarkAmbiguousContigs:
                                         )
                             else:
                                 vdj_ccall_p_count = dict(data1["umi_count"])
-                                vdj_ccall_c_count = dict(
-                                    data1["consensus_count"]
-                                )
+                                vdj_ccall_c_count = dict(data1["consensus_count"])
                                 if len(vdj_ccall_p_count) > 1:
                                     (
                                         vdj_p,
@@ -5133,14 +4855,12 @@ class MarkAmbiguousContigs:
                         vj_ccall_np_count = dict(data4["umi_count"])
                         vj_ccall_c_count = dict(data4["consensus_count"])
                         if len(vj_ccall_np_count) > 1:
-                            vj_np, extra_vjnp, ambiguous_vjnp = (
-                                check_productive_chain(
-                                    umi_counts=vj_ccall_np_count,
-                                    consensus_counts=vj_ccall_c_count,
-                                    umi_foldchange_cutoff=umi_foldchange_cutoff,
-                                    consensus_foldchange_cutoff=consensus_foldchange_cutoff,
-                                    ntop=ntop_vj,
-                                )
+                            vj_np, extra_vjnp, ambiguous_vjnp = check_productive_chain(
+                                umi_counts=vj_ccall_np_count,
+                                consensus_counts=vj_ccall_c_count,
+                                umi_foldchange_cutoff=umi_foldchange_cutoff,
+                                consensus_foldchange_cutoff=consensus_foldchange_cutoff,
+                                ntop=ntop_vj,
                             )
                             if len(ambiguous_vjnp) > 0:
                                 for a in ambiguous_vjnp:
@@ -5487,8 +5207,9 @@ def check_productive_chain(
     # if none pass the cutoff, then mark all as ambiguous
     # Allow up to two to pass the cutoff, keep those two contigs, and the rest that pass the cut off in the extra contigs, and mark the rest as ambiguous
     # If there are ties in the umi counts, then look at the consensus counts to break the tie using the same logic as above, but with a cutoff of 5.
-    min_umi_count, min_con_count = min(min(umi_counts.values()), 3), min(
-        min(consensus_counts.values()), 5
+    min_umi_count, min_con_count = (
+        min(min(umi_counts.values()), 3),
+        min(min(consensus_counts.values()), 5),
     )
     # test the umi fold change
     umi_test = {
@@ -5501,10 +5222,7 @@ def check_productive_chain(
     # test the consensus fold change
     con_test = {
         k: (
-            (
-                (consensus_counts[k] / min_con_count)
-                >= consensus_foldchange_cutoff
-            )
+            ((consensus_counts[k] / min_con_count) >= consensus_foldchange_cutoff)
             & (consensus_counts[k] >= 5)
         )
         for k in consensus_counts
@@ -5514,30 +5232,10 @@ def check_productive_chain(
         # get the top n contigs
         if len(filtered_contigs) <= ntop:
             keep_contigs.extend(list(filtered_contigs.keys()))
-            failed_contigs = {
-                k: v for k, v in umi_counts.items() if not umi_test[k]
-            }
+            failed_contigs = {k: v for k, v in umi_counts.items() if not umi_test[k]}
             ambiguous_contigs.extend(list(failed_contigs.keys()))
-        else:
-            # check the consensus fold change
-            if any(con_test.values()):
-                keep_contigs, extra_contigs, ambiguous_contigs = (
-                    keep_if_consensus_count_is_high(
-                        filtered_contigs=filtered_contigs,
-                        umi_counts=umi_counts,
-                        consensus_counts=consensus_counts,
-                        keep_contigs=keep_contigs,
-                        extra_contigs=extra_contigs,
-                        ambiguous_contigs=ambiguous_contigs,
-                        consensus_test=con_test,
-                        ntop=ntop,
-                    )
-                )
-            else:
-                # not enough counts to confidently classify
-                ambiguous_contigs.extend(list(umi_counts.keys()))
-    else:
-        if any(con_test.values()):
+        # check the consensus fold change
+        elif any(con_test.values()):
             keep_contigs, extra_contigs, ambiguous_contigs = (
                 keep_if_consensus_count_is_high(
                     filtered_contigs=filtered_contigs,
@@ -5551,8 +5249,24 @@ def check_productive_chain(
                 )
             )
         else:
-            # Not enough counts to confidently classify
-            ambiguous_contigs.extend(umi_counts.keys())
+            # not enough counts to confidently classify
+            ambiguous_contigs.extend(list(umi_counts.keys()))
+    elif any(con_test.values()):
+        keep_contigs, extra_contigs, ambiguous_contigs = (
+            keep_if_consensus_count_is_high(
+                filtered_contigs=filtered_contigs,
+                umi_counts=umi_counts,
+                consensus_counts=consensus_counts,
+                keep_contigs=keep_contigs,
+                extra_contigs=extra_contigs,
+                ambiguous_contigs=ambiguous_contigs,
+                consensus_test=con_test,
+                ntop=ntop,
+            )
+        )
+    else:
+        # Not enough counts to confidently classify
+        ambiguous_contigs.extend(umi_counts.keys())
 
     return keep_contigs, extra_contigs, ambiguous_contigs
 
@@ -5594,9 +5308,7 @@ def keep_if_consensus_count_is_high(
 
 def check_update_same_seq(
     data: pd.DataFrame,
-) -> tuple[
-    pd.DataFrame, list[str], list[int], list[str], dict[str, int], list[str]
-]:
+) -> tuple[pd.DataFrame, list[str], list[int], list[str], dict[str, int], list[str]]:
     """Check if sequences are the same.
 
     Parameters
@@ -5614,28 +5326,18 @@ def check_update_same_seq(
     keep_ccall = []
     umi_adjust = {}
     ambi_cont = []
-    sequencecol = (
-        "sequence_alignment" if "sequence_alignment" in data else "sequence"
-    )
+    sequencecol = "sequence_alignment" if "sequence_alignment" in data else "sequence"
     if sequencecol in data:
         seq_ = list(data[sequencecol])
         seq_2 = [s for s in seq_ if present(s)]
         if len(set(seq_2)) < len(seq_2):
-            _seq = {
-                k: r for k, r in dict(data[sequencecol]).items() if present(r)
-            }
-            _count = {
-                k: r for k, r in dict(data.umi_count).items() if k in _seq
-            }
+            _seq = {k: r for k, r in dict(data[sequencecol]).items() if present(r)}
+            _count = {k: r for k, r in dict(data.umi_count).items() if k in _seq}
             rep_seq = [
-                seq
-                for seq in set(_seq.values())
-                if countOf(_seq.values(), seq) > 1
+                seq for seq in set(_seq.values()) if countOf(_seq.values(), seq) > 1
             ]
             keep_seqs = [
-                seq
-                for seq in set(_seq.values())
-                if countOf(_seq.values(), seq) == 1
+                seq for seq in set(_seq.values()) if countOf(_seq.values(), seq) == 1
             ]
             keep_seqs_ids = [i for i, seq in _seq.items() if seq in keep_seqs]
             if len(rep_seq) > 0:
@@ -5663,9 +5365,7 @@ def check_update_same_seq(
                         data.at[keep_index_vj, "umi_count"] = keep_index_count
                 # refresh
                 empty_seqs_ids = [
-                    k
-                    for k, r in dict(data[sequencecol]).items()
-                    if not present(r)
+                    k for k, r in dict(data[sequencecol]).items() if not present(r)
                 ]
                 if len(empty_seqs_ids) > 0:
                     keep_seqs_ids = keep_seqs_ids + empty_seqs_ids
@@ -5681,9 +5381,7 @@ def check_update_same_seq(
     return (data, keep_id, keep_umi, keep_ccall, umi_adjust, ambi_cont)
 
 
-def choose_segments(
-    starts: pd.Series, ends: pd.Series, scores: pd.Series
-) -> list[str]:
+def choose_segments(starts: pd.Series, ends: pd.Series, scores: pd.Series) -> list[str]:
     """Choose left most segment
 
     Parameters
@@ -5777,9 +5475,7 @@ def multimapper(filename: str) -> pd.DataFrame:
                 "sequence_end_multimappers": ";".join(
                     group["j_sequence_end"].astype(str)
                 ),
-                "support_multimappers": ";".join(
-                    group["j_support"].astype(str)
-                ),
+                "support_multimappers": ";".join(group["j_support"].astype(str)),
             }
         )
 
@@ -5869,9 +5565,7 @@ def update_j_multimap(data: list[str], filename_prefix: list[str]):
                     update_j_col_df(dbfail, jmulti, col)
                 for i in dbfail.index:
                     if not present(dbfail.loc[i, "v_call"]):
-                        jmmappers = dbfail.at[i, "j_call_multimappers"].split(
-                            ";"
-                        )
+                        jmmappers = dbfail.at[i, "j_call_multimappers"].split(";")
                         jmmappersstart = dbfail.at[
                             i, "j_call_sequence_start_multimappers"
                         ].split(";")
@@ -5883,15 +5577,9 @@ def update_j_multimap(data: list[str], filename_prefix: list[str]):
                         ].split(";")
                         if len(jmmappers) > 1:
                             dbfail.at[i, "j_call"] = jmmappers[0]
-                            dbfail.at[i, "j_sequence_start"] = float(
-                                jmmappersstart[0]
-                            )
-                            dbfail.at[i, "j_sequence_end"] = float(
-                                jmmappersend[0]
-                            )
-                            dbfail.at[i, "j_support"] = float(
-                                jmmapperssupport[0]
-                            )
+                            dbfail.at[i, "j_sequence_start"] = float(jmmappersstart[0])
+                            dbfail.at[i, "j_sequence_end"] = float(jmmappersend[0])
+                            dbfail.at[i, "j_support"] = float(jmmapperssupport[0])
                 write_airr(dbfail, filePath2)
             if filePath3 is not None:
                 dball = load_data(filePath3)
@@ -5899,9 +5587,7 @@ def update_j_multimap(data: list[str], filename_prefix: list[str]):
                     update_j_col_df(dball, jmulti, col)
                 for i in dball.index:
                     if not present(dball.loc[i, "v_call"]):
-                        jmmappers = dball.at[i, "j_call_multimappers"].split(
-                            ";"
-                        )
+                        jmmappers = dball.at[i, "j_call_multimappers"].split(";")
                         jmmappersstart = dball.at[
                             i, "j_call_sequence_start_multimappers"
                         ].split(";")
@@ -5913,15 +5599,9 @@ def update_j_multimap(data: list[str], filename_prefix: list[str]):
                         ].split(";")
                         if len(jmmappers) > 1:
                             dball.at[i, "j_call"] = jmmappers[0]
-                            dball.at[i, "j_sequence_start"] = float(
-                                jmmappersstart[0]
-                            )
-                            dball.at[i, "j_sequence_end"] = float(
-                                jmmappersend[0]
-                            )
-                            dball.at[i, "j_support"] = float(
-                                jmmapperssupport[0]
-                            )
+                            dball.at[i, "j_sequence_start"] = float(jmmappersstart[0])
+                            dball.at[i, "j_sequence_end"] = float(jmmappersend[0])
+                            dball.at[i, "j_support"] = float(jmmapperssupport[0])
                 write_airr(dball, filePath3)
             if filePath4 is not None:
                 dandy = load_data(filePath4)
@@ -6031,11 +5711,10 @@ def mark_ntop_contigs(
             data_concat = pd.concat([productive_data, nonproductive_data])
         else:
             data_concat = productive_data
+    elif nonproductive_data is not None:
+        data_concat = nonproductive_data
     else:
-        if nonproductive_data is not None:
-            data_concat = nonproductive_data
-        else:
-            return additional_extras
+        return additional_extras
 
     # sort by productive and then by umi count
     data_concat = data_concat.sort_values(

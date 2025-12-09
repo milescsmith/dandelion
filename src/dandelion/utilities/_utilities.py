@@ -1,21 +1,20 @@
 #!/usr/bin/env python
-import h5py
 import os
 import re
 import warnings
-
-import numpy as np
-import pandas as pd
-
-from airr import RearrangementSchema
 from collections import defaultdict
+from collections.abc import Callable
 from pathlib import Path
 from subprocess import run
 from typing import (
-    TypeVar,
     Literal,
-    Callable,
+    TypeVar,
 )
+
+import h5py
+import numpy as np
+import pandas as pd
+from airr import RearrangementSchema
 
 # help silence the dtype warning?
 warnings.filterwarnings("ignore", category=pd.errors.DtypeWarning)
@@ -153,7 +152,7 @@ def makeblastdb(ref: Path | str) -> None:
         constant region fasta file.
     """
     cmd = ["makeblastdb", "-dbtype", "nucl", "-parse_seqids", "-in", str(ref)]
-    run(cmd)
+    run(cmd, check=False)
 
 
 def bh(pvalues: np.array) -> np.array:
@@ -181,8 +180,7 @@ def bh(pvalues: np.array) -> np.array:
         pvalue, index = vals
         new_values.append((n / rank) * pvalue)
     for i in range(0, int(n) - 1):
-        if new_values[i] < new_values[i + 1]:
-            new_values[i + 1] = new_values[i]
+        new_values[i + 1] = min(new_values[i + 1], new_values[i])
     for i, vals in enumerate(values):
         pvalue, index = vals
         new_pvalues[index] = new_values[i]
@@ -246,9 +244,7 @@ def check_filepath(
     Path | None
         Path object if file is found, else None.
     """
-    filename_pre = (
-        DEFAULT_PREFIX if filename_prefix is None else filename_prefix
-    )
+    filename_pre = DEFAULT_PREFIX if filename_prefix is None else filename_prefix
 
     ends_with = "" if ends_with is None else ends_with
     input_path = (
@@ -268,12 +264,8 @@ def check_filepath(
                             out_dir = out_dir / sub_dir
                         for file in out_dir.iterdir():
                             if file.name[0] != ".":
-                                if file.is_file() and str(file).endswith(
-                                    ends_with
-                                ):
-                                    if file.name.startswith(
-                                        filename_pre + "_contig"
-                                    ):
+                                if file.is_file() and str(file).endswith(ends_with):
+                                    if file.name.startswith(filename_pre + "_contig"):
                                         return file
         else:
             if sub_dir is not None:
@@ -381,9 +373,7 @@ def all_missing2(x: str | None) -> bool:
 def return_mix_dtype(data: pd.DataFrame) -> list:
     """Utility function to return mixed dtypes columns."""
     check = [
-        c
-        for c in data.columns
-        if pd.api.types.infer_dtype(data[c]).startswith("mixed")
+        c for c in data.columns if pd.api.types.infer_dtype(data[c]).startswith("mixed")
     ]
     return check
 
@@ -413,12 +403,10 @@ def get_numpy_dtype(series: pd.Series) -> str:
         return "f8"  # 64-bit float
     elif pd.api.types.is_bool_dtype(series):
         return "i1"  # 8-bit integer for booleans (True/False)
-    elif pd.api.types.is_string_dtype(series) or pd.api.types.is_object_dtype(
-        series
-    ):
+    elif pd.api.types.is_string_dtype(series) or pd.api.types.is_object_dtype(series):
         # Handle object or string columns; dynamically calculate the max string length
         max_length = series.astype(str).map(len).max()
-        return "S{}".format(max(1, max_length))  # String with max length
+        return f"S{max(1, max_length)}"  # String with max length
     else:
         raise TypeError(f"Unsupported data type: {series.name}")
 
@@ -501,9 +489,7 @@ def sanitize_column(series: pd.Series, dtype: str) -> pd.Series:
         return series.apply(sanitize_boolean)
     elif dtype == "string":
         series = series.apply(lambda x: "" if pd.isna(x) else x)
-        return series.replace(
-            [None, np.nan, "nan", "na", "NaN", ""], ""
-        ).astype(str)
+        return series.replace([None, np.nan, "nan", "na", "NaN", ""], "").astype(str)
     elif dtype in ["integer", "number"]:
         series = series.apply(lambda x: np.nan if pd.isna(x) else x)
         series = series.replace([None, np.nan, "nan", "na", "NaN", ""], np.nan)
@@ -556,8 +542,7 @@ def sanitize_data(data: pd.DataFrame, ignore: str = "clone_id") -> None:
                 )
                 if RearrangementSchema.properties[d]["type"] == "integer":
                     data[d] = [
-                        int(x) if present(x) else ""
-                        for x in pd.to_numeric(data[d])
+                        int(x) if present(x) else "" for x in pd.to_numeric(data[d])
                     ]
                 if RearrangementSchema.properties[d]["type"] == "boolean":
                     data[d] = data[d].apply(sanitize_boolean)
@@ -566,33 +551,27 @@ def sanitize_data(data: pd.DataFrame, ignore: str = "clone_id") -> None:
                     EMPTIES,
                     np.nan,
                 )
-        else:
-            if d != ignore:
-                try:
-                    data[d] = pd.to_numeric(data[d])
-                except:
-                    data[d] = data[d].replace(
-                        to_replace=EMPTIES,
-                        value="",
-                    )
+        elif d != ignore:
+            try:
+                data[d] = pd.to_numeric(data[d])
+            except:
+                data[d] = data[d].replace(
+                    to_replace=EMPTIES,
+                    value="",
+                )
         if re.search("mu_freq", d):
             data[d] = [
-                float(x) if present(x) else np.nan
-                for x in pd.to_numeric(data[d])
+                float(x) if present(x) else np.nan for x in pd.to_numeric(data[d])
             ]
         if re.search("mu_count", d):
-            data[d] = [
-                int(x) if present(x) else "" for x in pd.to_numeric(data[d])
-            ]
+            data[d] = [int(x) if present(x) else "" for x in pd.to_numeric(data[d])]
     try:
         data = check_travdv(data)
     except:
         pass
 
     if (
-        pd.Series(["cell_id", "umi_count", "productive"])
-        .isin(data.columns)
-        .all()
+        pd.Series(["cell_id", "umi_count", "productive"]).isin(data.columns).all()
     ):  # sort so that the productive contig with the largest umi is first
         data.sort_values(
             by=["cell_id", "productive", "umi_count"],
@@ -622,8 +601,7 @@ def sanitize_blastn(data: pd.DataFrame) -> None:
                 )
                 if RearrangementSchema.properties[d]["type"] == "integer":
                     data[d] = [
-                        int(x) if present(x) else ""
-                        for x in pd.to_numeric(data[d])
+                        int(x) if present(x) else "" for x in pd.to_numeric(data[d])
                     ]
             else:
                 data[d] = data[d].replace(
@@ -732,9 +710,7 @@ def load_data(obj: pd.DataFrame | Path | str | None) -> pd.DataFrame:
             obj_["sequence_id"] = obj_["sequence_id"].astype(str)
             obj_.set_index("sequence_id", drop=False, inplace=True)
             if "cell_id" not in obj_.columns:
-                obj_["cell_id"] = [
-                    c.split("_contig")[0] for c in obj_["sequence_id"]
-                ]
+                obj_["cell_id"] = [c.split("_contig")[0] for c in obj_["sequence_id"]]
             # assert that cell_id is string
             obj_["cell_id"] = obj_["cell_id"].astype(str)
         else:
@@ -742,9 +718,7 @@ def load_data(obj: pd.DataFrame | Path | str | None) -> pd.DataFrame:
 
         if "duplicate_count" in obj_.columns:
             if "umi_count" not in obj_.columns:
-                obj_.rename(
-                    columns={"duplicate_count": "umi_count"}, inplace=True
-                )
+                obj_.rename(columns={"duplicate_count": "umi_count"}, inplace=True)
 
         return obj_
 
@@ -823,9 +797,7 @@ def write_blastn(data: pd.DataFrame, save: Path | str) -> None:
     data.to_csv(save, sep="\t", index=False)
 
 
-def deprecated(
-    details: str, deprecated_in: str, removed_in: str
-) -> Callable[[F], F]:
+def deprecated(details: str, deprecated_in: str, removed_in: str) -> Callable[[F], F]:
     """Decorator to mark a function as deprecated"""
 
     def deprecated_decorator(func: F) -> F:
@@ -834,8 +806,8 @@ def deprecated(
         def deprecated_func(*args, **kwargs):
             """Deprecate function"""
             warnings.warn(
-                "{} is a deprecated in {} and will be removed in {}."
-                " {}".format(func.__name__, deprecated_in, removed_in, details),
+                f"{func.__name__} is a deprecated in {deprecated_in} and will be removed in {removed_in}."
+                f" {details}",
                 category=DeprecationWarning,
                 stacklevel=2,
             )
@@ -884,12 +856,11 @@ def format_call(
             x: y if present(y) else "None"
             for x, y in metadata[call + suffix_vdj].items()
         }
-        call_2 = {x: "None" for x in call_1.keys()}
+        call_2 = dict.fromkeys(call_1.keys(), "None")
         call_4 = call_3 = call_2
     call_1 = {x: y if "|" not in y else "Multi" for x, y in call_1.items()}
     call_3 = {
-        x: "Single" if y not in call_dict else call_dict[y]
-        for x, y in call_1.items()
+        x: "Single" if y not in call_dict else call_dict[y] for x, y in call_1.items()
     }
     return (
         list(call_1.values()),
@@ -905,7 +876,9 @@ def format_isotype1(metadata: pd.DataFrame) -> list[str]:
         (
             "IgM/IgD"
             if (i == "IgM|IgD") or (i == "IgD|IgM")
-            else "Multi" if "|" in i else i
+            else "Multi"
+            if "|" in i
+            else i
         )
         for i in metadata["isotype"]
     ]
@@ -948,9 +921,7 @@ def format_locus(
                 for e, l in enumerate(
                     [
                         ll
-                        for ll, p in zip(
-                            locus_1[i].split("|"), prod_1[i].split("|")
-                        )
+                        for ll, p in zip(locus_1[i].split("|"), prod_1[i].split("|"))
                         if p in TRUES
                     ]
                 )
@@ -960,20 +931,14 @@ def format_locus(
                 for e, l in enumerate(
                     [
                         ll
-                        for ll, p in zip(
-                            locus_2[i].split("|"), prod_2[i].split("|")
-                        )
+                        for ll, p in zip(locus_2[i].split("|"), prod_2[i].split("|"))
                         if p in TRUES
                     ]
                 )
             }
         else:
-            loc1 = {
-                e: l for e, l in enumerate([ll for ll in locus_1[i].split("|")])
-            }
-            loc2 = {
-                e: l for e, l in enumerate([ll for ll in locus_2[i].split("|")])
-            }
+            loc1 = {e: l for e, l in enumerate([ll for ll in locus_1[i].split("|")])}
+            loc2 = {e: l for e, l in enumerate([ll for ll in locus_2[i].split("|")])}
         loc1x, loc2x = [], []
         if not all([px == "None" for px in loc1.values()]):
             loc1xx = list(loc1.values())
@@ -989,16 +954,15 @@ def format_locus(
                 if len(loc2x) > 0:
                     if len(list(set(loc2x))) > 1:
                         tmp2 = "ambiguous"
-                    else:
-                        if len(loc2x) > 1:
-                            if (all(x in ["TRA", "TRG"] for x in loc2xx)) and (
-                                len(list(set(loc2xx))) == 2
-                            ):
-                                tmp2 = "Extra VJ-exception"
-                            else:
-                                tmp2 = "Extra VJ"
+                    elif len(loc2x) > 1:
+                        if (all(x in ["TRA", "TRG"] for x in loc2xx)) and (
+                            len(list(set(loc2xx))) == 2
+                        ):
+                            tmp2 = "Extra VJ-exception"
                         else:
-                            tmp2 = loc2xx[0]
+                            tmp2 = "Extra VJ"
+                    else:
+                        tmp2 = loc2xx[0]
                 else:
                     tmp2 = "None"
             else:
@@ -1011,25 +975,23 @@ def format_locus(
                         if productive_only:
                             v1 = [
                                 vv
-                                for vv, pp in zip(v1, prod_1[i].split("|"))
+                                for vv, pp in zip(v1, prod_1[i].split("|"), strict=True)
                                 if pp in TRUES
                             ]
                             d1 = [
                                 dd
-                                for dd, pp in zip(d1, prod_1[i].split("|"))
+                                for dd, pp in zip(d1, prod_1[i].split("|"), strict=True)
                                 if pp in TRUES
                             ]
                             j1 = [
                                 jj
-                                for jj, pp in zip(j1, prod_1[i].split("|"))
+                                for jj, pp in zip(j1, prod_1[i].split("|"), strict=True)
                                 if pp in TRUES
                             ]
                         same_vdj = True
-                        if len(v1) == 2 and len(d1) == 2 and len(j1) == 2:
+                        if len(v1) == 2 and len(d1) == 2 and len(j1) == 2:  # noqa: PLR2004
                             if not (
-                                v1[0] == v1[1]
-                                and d1[0] == d1[1]
-                                and j1[0] == j1[1]
+                                v1[0] == v1[1] and d1[0] == d1[1] and j1[0] == j1[1]
                             ):
                                 same_vdj = False
                         else:
@@ -1039,7 +1001,7 @@ def format_locus(
                         else:
                             tmp1 = "Extra VDJ"
                     elif (all(x in ["TRB", "TRD"] for x in loc1xx)) and (
-                        len(list(set(loc1xx))) == 2
+                        len(list(set(loc1xx))) == 2  # noqa: PLR2004
                     ):
                         tmp1 = "Extra VDJ-exception"
                     else:
@@ -1050,22 +1012,21 @@ def format_locus(
                 if len(loc2x) > 0:
                     if len(list(set(loc2x))) > 1:
                         tmp2 = "ambiguous"
-                    else:
-                        if len(loc2x) > 1:
-                            if (all(x in ["TRA", "TRG"] for x in loc2xx)) and (
-                                len(list(set(loc2xx))) == 2
-                            ):
-                                tmp2 = "Extra VJ-exception"
-                            else:
-                                tmp2 = "Extra VJ"
+                    elif len(loc2x) > 1:
+                        if (all(x in ["TRA", "TRG"] for x in loc2xx)) and (
+                            len(list(set(loc2xx))) == 2  # noqa: PLR2004
+                        ):
+                            tmp2 = "Extra VJ-exception"
                         else:
-                            tmp2 = loc2xx[0]
+                            tmp2 = "Extra VJ"
+                    else:
+                        tmp2 = loc2xx[0]
                 else:
                     tmp2 = "None"
 
-                if (
-                    tmp1 not in ["None", "Extra VDJ", "Extra VDJ-exception"]
-                ) and (tmp2 not in ["None", "Extra VJ", "Extra VJ-exception"]):
+                if (tmp1 not in ["None", "Extra VDJ", "Extra VDJ-exception"]) and (
+                    tmp2 not in ["None", "Extra VJ", "Extra VJ-exception"]
+                ):
                     if list(set(loc1x)) != list(set(loc2x)):
                         tmp1 = "ambiguous"
                         tmp2 = "ambiguous"
@@ -1074,16 +1035,15 @@ def format_locus(
             if len(loc2x) > 0:
                 if len(list(set(loc2x))) > 1:
                     tmp2 = "ambiguous"
-                else:
-                    if len(loc2x) > 1:
-                        if (all(x in ["TRA", "TRG"] for x in loc2xx)) and (
-                            len(list(set(loc2xx))) == 2
-                        ):
-                            tmp2 = "Extra VJ-exception"
-                        else:
-                            tmp2 = "Extra VJ"
+                elif len(loc2x) > 1:
+                    if (all(x in ["TRA", "TRG"] for x in loc2xx)) and (
+                        len(list(set(loc2xx))) == 2  # noqa: PLR2004
+                    ):
+                        tmp2 = "Extra VJ-exception"
                     else:
-                        tmp2 = loc2xx[0]
+                        tmp2 = "Extra VJ"
+                else:
+                    tmp2 = loc2xx[0]
             else:
                 tmp2 = "None"
         if any(tmp == "ambiguous" for tmp in [tmp1, tmp2]):
@@ -1114,11 +1074,13 @@ def lib_type(lib: str):
 
 def movecol(
     df: pd.DataFrame,
-    cols_to_move: list = [],
+    cols_to_move: list | None = None,
     ref_col: str = "",
 ) -> pd.DataFrame:
     """A way to order columns."""
     # https://towardsdatascience.com/reordering-pandas-dataframe-columns-thumbs-down-on-standard-solutions-1ff0bc2941d5
+    if cols_to_move is None:
+        cols_to_move = []
     cols = df.columns.tolist()
     seg1 = cols[: list(cols).index(ref_col) + 1]
     seg2 = cols_to_move
@@ -1164,7 +1126,7 @@ def set_germline_env(
     org: Literal["human", "mouse"] = "human",
     input_file: Path | str | None = None,
     db: Literal["imgt", "ogrdb"] = "imgt",
-) -> tuple[dict[str, str], Path, Path]:
+) -> tuple[dict[str, str], Path, Path | None]:
     """
     Set the paths to germline database and environment variables and relevant input files.
 
@@ -1192,23 +1154,25 @@ def set_germline_env(
     if germline is None:
         try:
             gml = Path(env["GERMLINE"])
-        except KeyError:
-            raise KeyError(
+        except KeyError as err:
+            msg = (
                 "Environmental variable $GERMLINE is missing. "
                 "Please 'export GERMLINE=/path/to/database/germlines/'"
             )
+            raise KeyError(msg) from err
         gml = gml / db / org / "vdj"
     else:
-        gml = env["GERMLINE"] = Path(germline)
+        gml = Path(germline)
+        env["GERMLINE"] = str(gml)
     if input_file is not None:
         input_file = Path(input_file)
     return env, gml, input_file
 
 
 def set_igblast_env(
-    igblast_db: Path | str | None = None,
+    igblast_db: Path | None = None,
     input_file: Path | str | None = None,
-) -> tuple[dict[str, str], Path, Path]:
+) -> tuple[dict[str, str], Path, Path | None]:
     """
     Set the igblast database and environment variables and relevant input files.
 
@@ -1232,14 +1196,16 @@ def set_igblast_env(
     env = os.environ.copy()
     if igblast_db is None:
         try:
-            igdb = Path(env["IGDATA"])
-        except KeyError:
-            raise KeyError(
+            igdb = Path(env["IGBLAST"])
+        except KeyError as err:
+            msg = (
                 "Environmental variable $IGDATA is missing. "
                 "Please 'export IGDATA=/path/to/database/igblast/'"
             )
+            raise KeyError(msg) from err
     else:
-        igdb = env["IGDATA"] = Path(igblast_db)
+        igdb = Path(igblast_db)
+        env["IGBLAST"] = str(igdb)
     if input_file is not None:
         input_file = Path(input_file)
     return env, igdb, input_file
@@ -1272,11 +1238,12 @@ def set_blast_env(
     if blast_db is None:
         try:
             bdb = Path(env["BLASTDB"])
-        except KeyError:
-            raise KeyError(
+        except KeyError as err:
+            msg = (
                 "Environmental variable $BLASTDB is missing. "
                 "Please 'export BLASTDB=/path/to/database/blast/'"
             )
+            raise KeyError(msg) from err
     else:
         bdb = env["BLASTDB"] = Path(blast_db)
     if input_file is not None:
@@ -1339,8 +1306,8 @@ def write_fasta(
         fh = open(out_fasta, "w")
         fh.close()
     out = ""
-    for l in fasta_dict:
-        out = ">" + l + "\n" + fasta_dict[l] + "\n"
+    for key, value in fasta_dict.items():
+        out = f">{key}\n{value}\n"
         write_output(out, out_fasta)
 
 

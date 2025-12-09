@@ -25,7 +25,7 @@ __classifiers__ = [
 
 __all__ = [
     "__author__",
-    "__email__",
     "__classifiers__",
+    "__email__",
     "__version__",
 ]

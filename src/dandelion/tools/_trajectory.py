@@ -1,15 +1,15 @@
 #!/usr/bin/env python
 # @author: chenqu, kp9, kelvin
 import re
+from typing import Literal
+
 import numpy as np
 import pandas as pd
 import scanpy as sc
 import scipy as sp
-
 from anndata import AnnData
-from typing import Literal
 
-from dandelion.utilities._utilities import bh, PResults
+from dandelion.utilities._utilities import PResults, bh
 
 
 def _filter_cells(
@@ -114,10 +114,9 @@ def setup_vdj_pseudobulk(
             adata = adata[
                 adata.obs["productive_" + mode + "_VJ"].str.startswith("T")
             ].copy()
-    else:
-        if productive_cols is not None:
-            for col in productive_cols:
-                adata = adata[adata.obs[col].str.startswith("T")].copy()
+    elif productive_cols is not None:
+        for col in productive_cols:
+            adata = adata[adata.obs[col].str.startswith("T")].copy()
 
     if any([re.search("_VDJ_main|_VJ_main", i) for i in adata.obs]):
         if check_vdj_mapping is not None:
@@ -128,9 +127,7 @@ def setup_vdj_pseudobulk(
                 check_vj_mapping = [check_vj_mapping]
 
     if allowed_chain_status is not None:
-        adata = adata[
-            adata.obs["chain_status"].isin(allowed_chain_status)
-        ].copy()
+        adata = adata[adata.obs["chain_status"].isin(allowed_chain_status)].copy()
 
     if (groups is not None) and (subsetby is not None):
         adata = adata[adata.obs[subsetby].isin(groups)].copy()
@@ -187,8 +184,7 @@ def setup_vdj_pseudobulk(
     else:
         for col in extract_cols:
             adata.obs[col + "_main"] = [
-                x.split("|")[0] if x != "None" else "None"
-                for x in adata.obs[col]
+                x.split("|")[0] if x != "None" else "None" for x in adata.obs[col]
             ]
 
     # remove any cells if there's unclear mapping
@@ -210,33 +206,31 @@ def setup_vdj_pseudobulk(
                         filter_pattern=filter_pattern,
                         remove_missing=remove_missing,
                     )
-        else:
-            if extract_cols is None:
-                if check_vdj_mapping is not None:
-                    for col in check_vdj_mapping:
-                        adata = _filter_cells(
-                            adata=adata,
-                            col=col + "_VDJ_main",
-                            filter_pattern=filter_pattern,
-                            remove_missing=remove_missing,
-                        )
-                if check_vj_mapping is not None:
-                    for col in check_vj_mapping:
-                        adata = _filter_cells(
-                            adata=adata,
-                            col=col + "_VJ_main",
-                            filter_pattern=filter_pattern,
-                            remove_missing=remove_missing,
-                        )
-            else:
-                if check_extract_cols_mapping is not None:
-                    for col in check_extract_cols_mapping:
-                        adata = _filter_cells(
-                            adata=adata,
-                            col=col + "_main",
-                            filter_pattern=filter_pattern,
-                            remove_missing=remove_missing,
-                        )
+        elif extract_cols is None:
+            if check_vdj_mapping is not None:
+                for col in check_vdj_mapping:
+                    adata = _filter_cells(
+                        adata=adata,
+                        col=col + "_VDJ_main",
+                        filter_pattern=filter_pattern,
+                        remove_missing=remove_missing,
+                    )
+            if check_vj_mapping is not None:
+                for col in check_vj_mapping:
+                    adata = _filter_cells(
+                        adata=adata,
+                        col=col + "_VJ_main",
+                        filter_pattern=filter_pattern,
+                        remove_missing=remove_missing,
+                    )
+        elif check_extract_cols_mapping is not None:
+            for col in check_extract_cols_mapping:
+                adata = _filter_cells(
+                    adata=adata,
+                    col=col + "_main",
+                    filter_pattern=filter_pattern,
+                    remove_missing=remove_missing,
+                )
 
     return adata
 
@@ -390,9 +384,7 @@ def vdj_pseudobulk(
             extract_cols = [
                 i
                 for i in adata.obs
-                if re.search(
-                    "|".join([mode + "_VDJ_main", mode + "_VJ_main"]), i
-                )
+                if re.search("|".join([mode + "_VDJ_main", mode + "_VJ_main"]), i)
             ]
 
     # perform matrix multiplication of pseudobulks by cells matrix by a cells by VJs matrix
@@ -402,9 +394,7 @@ def vdj_pseudobulk(
     # TODO: DENAN SOMEHOW? AS IN NAN GENES?
     # can now multiply transposed pseudobulk assignments by this vjs thing, turn to df
     vj_pb_count = pbs.T.dot(vjs.values)
-    df = pd.DataFrame(
-        vj_pb_count, index=np.arange(pbs.shape[1]), columns=vjs.columns
-    )
+    df = pd.DataFrame(vj_pb_count, index=np.arange(pbs.shape[1]), columns=vjs.columns)
 
     if normalise:
         # identify any missing calls inserted by the setup, will end with _missing
@@ -419,9 +409,7 @@ def vdj_pseudobulk(
             group_defined_mask = group_mask & defined_mask
             # compute sum of non-missing values for each pseudobulk for this category
             # and compare to the min_count
-            defined_min_count = (
-                df.loc[:, group_defined_mask].sum(axis=1) >= min_count
-            )
+            defined_min_count = df.loc[:, group_defined_mask].sum(axis=1) >= min_count
             # we can now normalise for the pseudobulks, for now all the pseudobulks
             df.loc[:, group_mask] = df.loc[:, group_mask].div(
                 df.loc[:, group_mask].sum(axis=1), axis=0
@@ -442,18 +430,14 @@ def vdj_pseudobulk(
     pbs_obs = _get_pbs_obs(pbs, obs_to_take, adata)
 
     # store our feature space and derived metadata into an AnnData
-    pb_adata = sc.AnnData(
-        np.array(df), var=pd.DataFrame(index=df.columns), obs=pbs_obs
-    )
+    pb_adata = sc.AnnData(np.array(df), var=pd.DataFrame(index=df.columns), obs=pbs_obs)
     # store the pseudobulk assignments, as a sparse for storage efficiency
     # transpose as the original matrix is cells x pseudobulks
     pb_adata.obsm["pbs"] = sp.sparse.csr_matrix(pbs.T)
     return pb_adata
 
 
-def pseudotime_transfer(
-    adata: AnnData, pr_res: PResults, suffix: str = ""
-) -> AnnData:
+def pseudotime_transfer(adata: AnnData, pr_res: PResults, suffix: str = "") -> AnnData:
     """Function to add pseudotime and branch probabilities into adata.obs in place.
 
     Parameters
@@ -515,9 +499,7 @@ def project_pseudotime_to_cell(
 
     # for each cell pseudotime_mean is the average of the pseudotime of all pseudobulks the cell is in, weighted by 1/neighbourhood size
     nhoods_cdata = nhoods[nhoodsum > 0, :]
-    nhoods_cdata_norm = nhoods_cdata / np.sum(
-        nhoods_cdata, axis=0, keepdims=True
-    )
+    nhoods_cdata_norm = nhoods_cdata / np.sum(nhoods_cdata, axis=0, keepdims=True)
 
     col_list = ["pseudotime" + suffix] + [
         "prob_" + state + suffix for state in term_states

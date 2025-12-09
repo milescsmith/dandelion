@@ -1,15 +1,15 @@
 #!/usr/bin/env python
-import numpy as np
-import networkx as nx
-import pandas as pd
 import warnings
-
-from anndata import AnnData
 from time import sleep
-from tqdm import tqdm
+from typing import Literal
+
+import networkx as nx
+import numpy as np
+import pandas as pd
+from anndata import AnnData
 from scanpy import logging as logg
 from scipy.special import gammaln
-from typing import Literal
+from tqdm import tqdm
 
 from dandelion.external.skbio._chao1 import chao1
 from dandelion.external.skbio._gini import gini_index
@@ -72,8 +72,7 @@ def clone_rarefaction(
 
     # remove those with no counts
     logg.info(
-        "removing due to zero counts: "
-        ", ".join(
+        "removing due to zero counts: , ".join(
             [res_.index[i] for i, x in enumerate(res_.sum(axis=1) == 0) if x]
         ),
     )
@@ -332,9 +331,7 @@ def clone_networkstats(
 
     if isinstance(vdj_data, Dandelion):
         if vdj_data.graph is None:
-            raise AttributeError(
-                "Graph not found. Please run tl.generate_network."
-            )
+            raise AttributeError("Graph not found. Please run tl.generate_network.")
         else:
             if expanded_only:
                 G = vdj_data.graph[1]
@@ -359,21 +356,15 @@ def clone_networkstats(
                 if len(nodes) > 1:
                     G_ = G.subgraph(nodes).copy()
                     remove_edges[tmp] = [
-                        (e[0], e[1])
-                        for e in G_.edges(data=True)
-                        if e[2]["weight"] > 0
+                        (e[0], e[1]) for e in G_.edges(data=True) if e[2]["weight"] > 0
                     ]
                     if len(remove_edges[tmp]) > 0:
                         G_.remove_edges_from(remove_edges[tmp])
                         for connected in nx.connected_components(G_):
                             vertexsizes[tmp].append(len(connected))
-                        vertexsizes[tmp] = sorted(
-                            vertexsizes[tmp], reverse=True
-                        )
+                        vertexsizes[tmp] = sorted(vertexsizes[tmp], reverse=True)
                     else:
-                        vertexsizes[tmp] = [
-                            1 for i in range(len(G_.edges(data=True)))
-                        ]
+                        vertexsizes[tmp] = [1 for i in range(len(G_.edges(data=True)))]
                     if network_clustersize:
                         clustersizes[tmp] = len(vertexsizes[tmp])
                     else:
@@ -384,7 +375,7 @@ def clone_networkstats(
 
             return (nodes_names, vertexsizes, clustersizes)
     else:
-        raise TypeError("Input object must be of {}".format(Dandelion))
+        raise TypeError(f"Input object must be of {Dandelion}")
 
 
 def diversity_gini(
@@ -670,9 +661,7 @@ def diversity_shannon(
                 logg.info(
                     " finished",
                     time=start,
-                    deep=(
-                        "updated `.metadata` with normalized Shannon entropy.\n"
-                    ),
+                    deep=("updated `.metadata` with normalized Shannon entropy.\n"),
                 )
             else:
                 logg.info(
@@ -841,9 +830,7 @@ def gini_indices(
 
     res1 = {}
     if met == "clone_network":
-        logg.info(
-            "Computing Gini indices for cluster and vertex size using network."
-        )
+        logg.info("Computing Gini indices for cluster and vertex size using network.")
         if not reconstruct_network:
             n_n, v_s, c_s = clone_networkstats(
                 data,
@@ -868,12 +855,8 @@ def gini_indices(
             g_c_c = calculate_gini_index(c_sizes)
             for cell in n_n:
                 g_c_c_res.update({cell: g_c_c})
-            data.metadata["clone_network_vertex_size_gini"] = pd.Series(
-                g_c_v_res
-            )
-            data.metadata["clone_network_cluster_size_gini"] = pd.Series(
-                g_c_c_res
-            )
+            data.metadata["clone_network_vertex_size_gini"] = pd.Series(g_c_v_res)
+            data.metadata["clone_network_cluster_size_gini"] = pd.Series(g_c_c_res)
     elif met == "clone_centrality":
         logg.info(
             "Computing gini indices for clone size using metadata and node closeness centrality using network."
@@ -889,9 +872,7 @@ def gini_indices(
     res2 = {}
     if resample:
         logg.info(
-            "Downsampling each group specified in `{}` to {} cells for calculating gini indices.".format(
-                groupby, minsize
-            )
+            f"Downsampling each group specified in `{groupby}` to {minsize} cells for calculating gini indices."
         )
     for g in groups:
         # clone size distribution
@@ -926,9 +907,9 @@ def gini_indices(
                         resampled.metadata["clone_network_vertex_size_gini"] = (
                             pd.Series(g_c_v_res)
                         )
-                        resampled.metadata[
-                            "clone_network_cluster_size_gini"
-                        ] = pd.Series(g_c_c_res)
+                        resampled.metadata["clone_network_cluster_size_gini"] = (
+                            pd.Series(g_c_c_res)
+                        )
                     elif met == "clone_centrality":
                         clone_centrality(resampled)
                     elif met == "clone_degree":
@@ -936,7 +917,7 @@ def gini_indices(
                     else:
                         raise ValueError(
                             "Unknown metric for calculating network stats. Please specify "
-                            + "one of `clone_network`, `clone_centrality` or `clone_degree`."
+                            "one of `clone_network`, `clone_centrality` or `clone_degree`."
                         )
                     # clone size gini
                     _dat = resampled.metadata.copy()
@@ -1011,9 +992,7 @@ def gini_indices(
                         res1.update({g: pd.Series(g_c_c_res).mean()})
                     else:
                         res2.update({g: _dat[met + "_vertex_size_gini"].mean()})
-                        res1.update(
-                            {g: _dat[met + "_cluster_size_gini"].mean()}
-                        )
+                        res1.update({g: _dat[met + "_cluster_size_gini"].mean()})
                 else:
                     # vertex closeness centrality or weighted degree distribution
                     # only calculate for expanded clones. If including non-expanded clones, the centrality is
@@ -1023,9 +1002,7 @@ def gini_indices(
                     # graphcounts = np.append(graphcounts, 0) # if I add a  zero here, it will skew the results
                     # when the centrality measure is uniform.... so leave it out for now.
                     g_c = (
-                        calculate_gini_index(graphcounts)
-                        if len(graphcounts) > 0
-                        else 0
+                        calculate_gini_index(graphcounts) if len(graphcounts) > 0 else 0
                     )
                     res2.update({g: g_c})
     if "res2" in locals():
@@ -1039,30 +1016,26 @@ def gini_indices(
             else:
                 res_df.columns = ["clone_size_gini", met + "_gini"]
         else:
-            if not type(key_added) is list:
+            if type(key_added) is not list:
                 key_added = [key_added]
             if len(key_added) == len(res_df.columns):
                 res_df.columns = key_added
             else:
                 raise ValueError(
-                    "Please provide {} key(s) for new column names.".format(
-                        len(res_df.columns)
-                    )
+                    f"Please provide {len(res_df.columns)} key(s) for new column names."
                 )
     else:
         res_df = pd.DataFrame.from_dict([res1]).T
         if key_added is None:
             res_df.columns = ["clone_size_gini"]
         else:
-            if not type(key_added) is list:
+            if type(key_added) is not list:
                 key_added = [key_added]
             if len(key_added) == len(res_df.columns):
                 res_df.columns = key_added
             else:
                 raise ValueError(
-                    "Please provide {} key(s) for new column names.".format(
-                        len(res_df.columns)
-                    )
+                    f"Please provide {len(res_df.columns)} key(s) for new column names."
                 )
     return res_df
 
@@ -1110,9 +1083,7 @@ def chao1_estimates(
                 clonesizecounts = np.array(_tab)
                 clonesizecounts = clonesizecounts[clonesizecounts > 0]
                 g_c = (
-                    calculate_chao1(clonesizecounts)
-                    if len(clonesizecounts) > 0
-                    else 0
+                    calculate_chao1(clonesizecounts) if len(clonesizecounts) > 0 else 0
                 )
                 sizelist.append(g_c)
             safe_average_update(res1, g, sizelist)
@@ -1121,11 +1092,7 @@ def chao1_estimates(
             drop_nan_values(_tab)
             clonesizecounts = np.array(_tab)
             clonesizecounts = clonesizecounts[clonesizecounts > 0]
-            g_c = (
-                calculate_chao1(clonesizecounts)
-                if len(clonesizecounts) > 0
-                else 0
-            )
+            g_c = calculate_chao1(clonesizecounts) if len(clonesizecounts) > 0 else 0
             res1.update({g: g_c})
 
     res_df = pd.DataFrame.from_dict([res1]).T
@@ -1202,9 +1169,7 @@ def shannon_entropy(
     return res_df
 
 
-def calculate_gini_index(
-    values: np.ndarray, method: str = "trapezoids"
-) -> float:
+def calculate_gini_index(values: np.ndarray, method: str = "trapezoids") -> float:
     """
     Calculate the Gini index for a given array of values.
 
@@ -1263,8 +1228,7 @@ def calculate_shannon_entropy(values: np.ndarray, normalize: bool) -> float:
         else:
             values_freqs = values / np.sum(values)
             return -np.sum(
-                (values_freqs * np.log(values_freqs))
-                / np.log(len(values_freqs))
+                (values_freqs * np.log(values_freqs)) / np.log(len(values_freqs))
             )
     else:
         return shannon(values)
@@ -1300,11 +1264,10 @@ def rename_result_column(
     """Processes the output result"""
     if key_added is None:
         res_df.columns = ["clone_size_" + diversity_mode]
+    elif isinstance(key_added, list):
+        res_df.columns = key_added[0]
     else:
-        if isinstance(key_added, list):
-            res_df.columns = key_added[0]
-        else:
-            res_df.columns = [key_added]
+        res_df.columns = [key_added]
 
 
 def calculate_minsize_and_log(
@@ -1348,32 +1311,23 @@ def calculate_minsize_and_log(
     else:
         minsize = downsample
         if minsize > df[col].value_counts().min():
-
             logg.info(
-                "Downsampling size provided of {} was larger than the smallest group size. ".format(
-                    downsample
-                )
-                + "Defaulting to the smallest group size for downsampling."
+                f"Downsampling size provided of {downsample} was larger than the smallest group size. "
+                "Defaulting to the smallest group size for downsampling."
             )
             minsize = df[col].value_counts().min()
 
     # Log a warning if the minimum size is too small
     if minsize < 100:
-
         logg.info(
-            "The minimum cell numbers when grouped by {} is {}.".format(
-                col, minsize
-            )
-            + " Exercise caution when interpreting diversity measures."
+            f"The minimum cell numbers when grouped by {col} is {minsize}."
+            " Exercise caution when interpreting diversity measures."
         )
 
     # Log information about resampling
     if resample:
-
         logg.info(
-            "Downsampling each group specified in `{}` to {} cells for calculating Shannon entropy.".format(
-                col, minsize
-            )
+            f"Downsampling each group specified in `{col}` to {minsize} cells for calculating Shannon entropy."
         )
 
     return minsize

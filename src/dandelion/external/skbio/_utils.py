@@ -2,9 +2,7 @@ import numpy as np
 
 
 ## from skbio==0.5.6
-def validate_counts_vector(
-    counts: np.array, suppress_cast: bool = False
-) -> np.array:
+def validate_counts_vector(counts: np.array, suppress_cast: bool = False) -> np.array:
     """Validate and convert input to an acceptable counts vector type.
     Note: may not always return a copy of `counts`!
     """

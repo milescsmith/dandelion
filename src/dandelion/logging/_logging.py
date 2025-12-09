@@ -44,9 +44,7 @@ def print_versions(dependencies: list[str] = modules):
         list of dependencies.
     """
     print(
-        " ".join(
-            f"{mod}=={ver}" for mod, ver in _versions_dependencies(dependencies)
-        )
+        " ".join(f"{mod}=={ver}" for mod, ver in _versions_dependencies(dependencies))
     )
 
 
@@ -60,7 +58,5 @@ def print_header(dependencies: list[str] = modules):
         list of dependencies.
     """
     print(
-        " ".join(
-            f"{mod}=={ver}" for mod, ver in _versions_dependencies(dependencies)
-        )
+        " ".join(f"{mod}=={ver}" for mod, ver in _versions_dependencies(dependencies))
     )

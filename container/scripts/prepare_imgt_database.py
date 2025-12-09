@@ -1,3 +1,5 @@
+#! /usr/local/bin/python
+
 import argparse
 import concurrent.futures
 import logging
@@ -36,9 +38,7 @@ def parse_args():
     return args
 
 
-def copy_db_from_igblast(
-    out_dir: str | Path, igblast_loc: str | Path | None = None
-):
+def copy_db_from_igblast(out_dir: str | Path, igblast_loc: str | Path | None = None):
     """
     Copy internal data from igblast's folder to the new database folder.
 
@@ -56,9 +56,7 @@ def copy_db_from_igblast(
     else:
         lib_path = Path(igblast_loc)
     for folder in ["optional_file", "internal_data"]:
-        shutil.copytree(
-            lib_path / folder, Path(out_dir) / folder, dirs_exist_ok=True
-        )
+        shutil.copytree(lib_path / folder, Path(out_dir) / folder, dirs_exist_ok=True)
 
 
 def download_germline_and_process(
@@ -104,22 +102,21 @@ def download_germline_and_process(
             "rabbit": ["Oryctolagus cuniculus", "Oryctolagus_cuniculus"],
             # "rhesus_monkey": ["Macaca mulatta", "Macaca_mulatta"], # seems like there's an issue retrieving this from IMGT/GENE-DB 18/07/2024
         }
-        url = f"{source}/GENElect?query={query_type}+{chain}&species={query}{url_suffix}"
-        file_name = f"{str(file_path)}/imgt_{add_prefix}{species}_{chain}{add_suffix}.fasta"
+        url = (
+            f"{source}/GENElect?query={query_type}+{chain}&species={query}{url_suffix}"
+        )
+        file_name = (
+            f"{str(file_path)}/imgt_{add_prefix}{species}_{chain}{add_suffix}.fasta"
+        )
 
         # Stop if the file already exists
         if os.path.exists(file_name):
-            logging.info(
-                f"Skipping download of {file_name} as it already exists."
-            )
+            logging.info(f"Skipping download of {file_name} as it already exists.")
             return
         # else download the file
         with urlopen(url, timeout=60) as response:
             content = (
-                response.read()
-                .decode("utf-8")
-                .split("<pre>")[2]
-                .split("</pre>")[0]
+                response.read().decode("utf-8").split("<pre>")[2].split("</pre>")[0]
             )
 
         # Check if the downloaded content is empty
@@ -155,7 +152,7 @@ def download_germline_and_process(
 def download_bcr_constant_and_process(
     species: str,
     query: str,
-    file_path: str | Path,
+    file_path: Path,
     source: str,
 ):
     """
@@ -167,11 +164,15 @@ def download_bcr_constant_and_process(
         Species name.
     query : str
         Query species name for url.
-    file_path : str | Path
+    file_path : Path
         Path to write fasta file to.
     source : str
         Source url.
     """
+
+    if isinstance(file_path, str):
+        file_path = Path(file_path)
+
     urls = [
         f"{source}/GENElect?query=8.1+IGHC&species={query}&IMGTlabel=CH1",
         f"{source}/GENElect?query=8.1+IGKC&species={query}&IMGTlabel=C-REGION",
@@ -181,9 +182,7 @@ def download_bcr_constant_and_process(
     file_path.mkdir(parents=True, exist_ok=True)
     # Stop if the file already exists
     if os.path.exists(file_name):
-        logging.info(
-            f"Skipping download of {file_name.stem} as it already exists."
-        )
+        logging.info(f"Skipping download of {file_name.stem} as it already exists.")
         return
     else:
         fh = open(file_name, "w")
@@ -194,10 +193,7 @@ def download_bcr_constant_and_process(
     for url in urls:
         with urlopen(url, timeout=60) as response:
             content = (
-                response.read()
-                .decode("utf-8")
-                .split("<pre>")[2]
-                .split("</pre>")[0]
+                response.read().decode("utf-8").split("<pre>")[2].split("</pre>")[0]
             )
         # Remove empty lines
         content_lines = [line for line in content.splitlines() if line.strip()]
@@ -486,18 +482,14 @@ def main():
                                 new_header = header.split("|")[1].strip()
                                 if new_header not in seqs:
                                     seqs[new_header] = (
-                                        sequence.replace(".", "")
-                                        .upper()
-                                        .rstrip()
+                                        sequence.replace(".", "").upper().rstrip()
                                     )
                             fh.close()
                     write_fasta(seqs, out_file)
         # convert to igblast database
         igblastdb_out.mkdir(parents=True, exist_ok=True)
         for fastafile in [
-            f
-            for f in sorted(igblast_out.iterdir())
-            if f.stem.startswith("imgt")
+            f for f in sorted(igblast_out.iterdir()) if f.stem.startswith("imgt")
         ]:
             cmd = [
                 str(makeblastdb),
@@ -514,17 +506,13 @@ def main():
             res = subprocess.run(cmd, stdout=subprocess.PIPE)
             logging.info(res.stdout.decode("utf-8"))
     # copying igblast internal data to igblast folder
-    copy_db_from_igblast(
-        out_dir=out_dir / "igblast", igblast_loc=args.igblast_dir
-    )
+    copy_db_from_igblast(out_dir=out_dir / "igblast", igblast_loc=args.igblast_dir)
     # download for blast
     for species, query in species_dict.items():
         logging.info(
             f"Downloading IMGT BCR constant sequences for blast database for {species}"
         )
-        download_bcr_constant_and_process(
-            species, query, blast_out / species, source
-        )
+        download_bcr_constant_and_process(species, query, blast_out / species, source)
     for species, query in species_dict.items():
         logging.info(f"Converting to blast database for {species}")
         fastafile = blast_out / species / f"{species}_BCR_C.fasta"

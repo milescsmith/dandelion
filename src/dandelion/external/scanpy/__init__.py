@@ -1,10 +1,9 @@
 import re
-import scipy.stats
 
 import numpy as np
 import pandas as pd
 import scanpy as sc
-
+import scipy.stats
 from anndata import AnnData
 from sklearn import mixture
 
@@ -111,9 +110,7 @@ def recipe_scanpy_qc(
         try:
             import scrublet as scr
         except ImportError:
-            raise ImportError(
-                "Please install scrublet with pip install scrublet."
-            )
+            raise ImportError("Please install scrublet with pip install scrublet.")
         if layer is None:
             scrub = scr.Scrublet(_adata.X)
         else:
@@ -123,9 +120,7 @@ def recipe_scanpy_qc(
         # overcluster prep.
         sc.pp.normalize_total(_adata, target_sum=1e4)
         sc.pp.log1p(_adata)
-        sc.pp.highly_variable_genes(
-            _adata, min_mean=0.0125, max_mean=3, min_disp=0.5
-        )
+        sc.pp.highly_variable_genes(_adata, min_mean=0.0125, max_mean=3, min_disp=0.5)
         for i in _adata.var.index:
             if vdj_pattern is not None:
                 if re.search(vdj_pattern, i):
@@ -141,21 +136,17 @@ def recipe_scanpy_qc(
         # then cluster each cluster
         sc.tl.leiden(_adata)
         for clus in list(np.unique(_adata.obs["leiden"]))[0]:
-            sc.tl.leiden(
-                _adata, restrict_to=("leiden", [clus]), key_added="leiden_R"
-            )
+            sc.tl.leiden(_adata, restrict_to=("leiden", [clus]), key_added="leiden_R")
         # weird how the new anndata/scanpy is forcing this
         for clus in list(np.unique(_adata.obs["leiden"]))[1:]:
-            sc.tl.leiden(
-                _adata, restrict_to=("leiden_R", [clus]), key_added="leiden_R"
-            )
+            sc.tl.leiden(_adata, restrict_to=("leiden_R", [clus]), key_added="leiden_R")
         # compute the cluster scores - the median of Scrublet scores per
         # overclustered cluster
         for clus in np.unique(_adata.obs["leiden_R"]):
-            _adata.obs.loc[
-                _adata.obs["leiden_R"] == clus, "scrublet_cluster_score"
-            ] = np.median(
-                _adata.obs.loc[_adata.obs["leiden_R"] == clus, "scrublet_score"]
+            _adata.obs.loc[_adata.obs["leiden_R"] == clus, "scrublet_cluster_score"] = (
+                np.median(
+                    _adata.obs.loc[_adata.obs["leiden_R"] == clus, "scrublet_score"]
+                )
             )
         # now compute doublet p-values. figure out the median and mad
         # (from above-median values) for the distribution
@@ -168,9 +159,7 @@ def recipe_scanpy_qc(
         )
         _adata.obs["scrublet_score_bh_pval"] = bh(pvals)
         # threshold the p-values to get doublet calls.
-        _adata.obs["is_doublet"] = (
-            _adata.obs["scrublet_score_bh_pval"] < pval_cutoff
-        )
+        _adata.obs["is_doublet"] = _adata.obs["scrublet_score_bh_pval"] < pval_cutoff
     else:
         _adata.obs["is_doublet"] = False
     if mito_cutoff is not None:
@@ -188,80 +177,51 @@ def recipe_scanpy_qc(
                 | (_adata.obs["pct_counts_mt"] >= mito_cutoff)
                 | (_adata.obs.is_doublet)
             )
-        else:
-            if min_counts is not None:
-                if max_counts is not None:
-                    _adata.obs["filter_rna"] = (
-                        (
-                            pd.Series(
-                                [
-                                    ((n < min_genes) or (n > max_genes))
-                                    for n in _adata.obs["n_genes_by_counts"]
-                                ],
-                                index=_adata.obs.index,
-                            )
+        elif min_counts is not None:
+            if max_counts is not None:
+                _adata.obs["filter_rna"] = (
+                    (
+                        pd.Series(
+                            [
+                                ((n < min_genes) or (n > max_genes))
+                                for n in _adata.obs["n_genes_by_counts"]
+                            ],
+                            index=_adata.obs.index,
                         )
-                        | (
-                            pd.Series(
-                                [
-                                    min_counts < n > max_counts
-                                    for n in _adata.obs["total_counts"]
-                                ],
-                                index=_adata.obs.index,
-                            )
-                        )
-                        | (_adata.obs["pct_counts_mt"] >= mito_cutoff)
-                        | (_adata.obs.is_doublet)
                     )
-                else:
-                    _adata.obs["filter_rna"] = (
-                        (
-                            pd.Series(
-                                [
-                                    ((n < min_genes) or (n > max_genes))
-                                    for n in _adata.obs["n_genes_by_counts"]
-                                ],
-                                index=_adata.obs.index,
-                            )
+                    | (
+                        pd.Series(
+                            [
+                                min_counts < n > max_counts
+                                for n in _adata.obs["total_counts"]
+                            ],
+                            index=_adata.obs.index,
                         )
-                        | (
-                            pd.Series(
-                                [
-                                    n < min_counts
-                                    for n in _adata.obs["total_counts"]
-                                ],
-                                index=_adata.obs.index,
-                            )
-                        )
-                        | (_adata.obs["pct_counts_mt"] >= mito_cutoff)
-                        | (_adata.obs.is_doublet)
                     )
+                    | (_adata.obs["pct_counts_mt"] >= mito_cutoff)
+                    | (_adata.obs.is_doublet)
+                )
             else:
-                if max_counts is not None:
-                    _adata.obs["filter_rna"] = (
-                        (
-                            pd.Series(
-                                [
-                                    ((n < min_genes) or (n > max_genes))
-                                    for n in _adata.obs["n_genes_by_counts"]
-                                ],
-                                index=_adata.obs.index,
-                            )
+                _adata.obs["filter_rna"] = (
+                    (
+                        pd.Series(
+                            [
+                                ((n < min_genes) or (n > max_genes))
+                                for n in _adata.obs["n_genes_by_counts"]
+                            ],
+                            index=_adata.obs.index,
                         )
-                        | (
-                            pd.Series(
-                                [
-                                    n > max_counts
-                                    for n in _adata.obs["total_counts"]
-                                ],
-                                index=_adata.obs.index,
-                            )
-                        )
-                        | (_adata.obs["pct_counts_mt"] >= mito_cutoff)
-                        | (_adata.obs.is_doublet)
                     )
-    else:
-        if min_counts is None and max_counts is None:
+                    | (
+                        pd.Series(
+                            [n < min_counts for n in _adata.obs["total_counts"]],
+                            index=_adata.obs.index,
+                        )
+                    )
+                    | (_adata.obs["pct_counts_mt"] >= mito_cutoff)
+                    | (_adata.obs.is_doublet)
+                )
+        elif max_counts is not None:
             _adata.obs["filter_rna"] = (
                 (
                     pd.Series(
@@ -272,81 +232,93 @@ def recipe_scanpy_qc(
                         index=_adata.obs.index,
                     )
                 )
+                | (
+                    pd.Series(
+                        [n > max_counts for n in _adata.obs["total_counts"]],
+                        index=_adata.obs.index,
+                    )
+                )
+                | (_adata.obs["pct_counts_mt"] >= mito_cutoff)
+                | (_adata.obs.is_doublet)
+            )
+    elif min_counts is None and max_counts is None:
+        _adata.obs["filter_rna"] = (
+            (
+                pd.Series(
+                    [
+                        ((n < min_genes) or (n > max_genes))
+                        for n in _adata.obs["n_genes_by_counts"]
+                    ],
+                    index=_adata.obs.index,
+                )
+            )
+            | ~(_adata.obs.gmm_pct_count_clusters_keep)
+            | (_adata.obs.is_doublet)
+        )
+    elif min_counts is not None:
+        if max_counts is not None:
+            _adata.obs["filter_rna"] = (
+                (
+                    pd.Series(
+                        [
+                            ((n < min_genes) or (n > max_genes))
+                            for n in _adata.obs["n_genes_by_counts"]
+                        ],
+                        index=_adata.obs.index,
+                    )
+                )
+                | (
+                    pd.Series(
+                        [
+                            min_counts < n > max_counts
+                            for n in _adata.obs["total_counts"]
+                        ],
+                        index=_adata.obs.index,
+                    )
+                )
                 | ~(_adata.obs.gmm_pct_count_clusters_keep)
                 | (_adata.obs.is_doublet)
             )
         else:
-            if min_counts is not None:
-                if max_counts is not None:
-                    _adata.obs["filter_rna"] = (
-                        (
-                            pd.Series(
-                                [
-                                    ((n < min_genes) or (n > max_genes))
-                                    for n in _adata.obs["n_genes_by_counts"]
-                                ],
-                                index=_adata.obs.index,
-                            )
-                        )
-                        | (
-                            pd.Series(
-                                [
-                                    min_counts < n > max_counts
-                                    for n in _adata.obs["total_counts"]
-                                ],
-                                index=_adata.obs.index,
-                            )
-                        )
-                        | ~(_adata.obs.gmm_pct_count_clusters_keep)
-                        | (_adata.obs.is_doublet)
+            _adata.obs["filter_rna"] = (
+                (
+                    pd.Series(
+                        [
+                            ((n < min_genes) or (n > max_genes))
+                            for n in _adata.obs["n_genes_by_counts"]
+                        ],
+                        index=_adata.obs.index,
                     )
-                else:
-                    _adata.obs["filter_rna"] = (
-                        (
-                            pd.Series(
-                                [
-                                    ((n < min_genes) or (n > max_genes))
-                                    for n in _adata.obs["n_genes_by_counts"]
-                                ],
-                                index=_adata.obs.index,
-                            )
-                        )
-                        | (
-                            pd.Series(
-                                [
-                                    n < min_counts
-                                    for n in _adata.obs["total_counts"]
-                                ],
-                                index=_adata.obs.index,
-                            )
-                        )
-                        | ~(_adata.obs.gmm_pct_count_clusters_keep)
-                        | (_adata.obs.is_doublet)
+                )
+                | (
+                    pd.Series(
+                        [n < min_counts for n in _adata.obs["total_counts"]],
+                        index=_adata.obs.index,
                     )
-            else:
-                if max_counts is not None:
-                    _adata.obs["filter_rna"] = (
-                        (
-                            pd.Series(
-                                [
-                                    ((n < min_genes) or (n > max_genes))
-                                    for n in _adata.obs["n_genes_by_counts"]
-                                ],
-                                index=_adata.obs.index,
-                            )
-                        )
-                        | (
-                            pd.Series(
-                                [
-                                    n > max_counts
-                                    for n in _adata.obs["total_counts"]
-                                ],
-                                index=_adata.obs.index,
-                            )
-                        )
-                        | ~(_adata.obs.gmm_pct_count_clusters_keep)
-                        | (_adata.obs.is_doublet)
-                    )
+                )
+                | ~(_adata.obs.gmm_pct_count_clusters_keep)
+                | (_adata.obs.is_doublet)
+            )
+    elif max_counts is not None:
+        _adata.obs["filter_rna"] = (
+            (
+                pd.Series(
+                    [
+                        ((n < min_genes) or (n > max_genes))
+                        for n in _adata.obs["n_genes_by_counts"]
+                    ],
+                    index=_adata.obs.index,
+                )
+            )
+            | (
+                pd.Series(
+                    [n > max_counts for n in _adata.obs["total_counts"]],
+                    index=_adata.obs.index,
+                )
+            )
+            | ~(_adata.obs.gmm_pct_count_clusters_keep)
+            | (_adata.obs.is_doublet)
+        )
     bool_dict = {True: "True", False: "False"}
 
     _adata.obs["is_doublet"] = [bool_dict[x] for x in _adata.obs["is_doublet"]]

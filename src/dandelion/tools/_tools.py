@@ -3,23 +3,22 @@ import math
 import os
 import re
 import sys
+from collections import Counter, defaultdict
+from itertools import product
+from subprocess import run
+from typing import Literal
 
 import networkx as nx
 import numpy as np
 import pandas as pd
 import scanpy as sc
-
 from anndata import AnnData
 from changeo.Gene import getGene
-from collections import defaultdict, Counter
 from distance import hamming
-from itertools import product
 from scanpy import logging as logg
 from scipy.sparse import csr_matrix
 from scipy.spatial.distance import pdist, squareform
-from subprocess import run
 from tqdm import tqdm
-from typing import Literal
 
 from dandelion.tools._network import *
 from dandelion.utilities._core import *
@@ -128,11 +127,9 @@ def find_clones(
                     identity.update({locusx: DEFAULTIDENTITY[locusx]})
                     warnings.warn(
                         UserWarning(
-                            "Identity value for {} chains ".format(locusx)
-                            + "not specified in provided dictionary. "
-                            + "Defaulting to {} for {} chains.".format(
-                                DEFAULTIDENTITY[locusx], locusx
-                            )
+                            f"Identity value for {locusx} chains "
+                            "not specified in provided dictionary. "
+                            f"Defaulting to {DEFAULTIDENTITY[locusx]} for {locusx} chains."
                         )
                     )
                 identity_ = identity[locusx]
@@ -145,9 +142,7 @@ def find_clones(
             if dat_vdj.shape[0] > 0:
                 vj_len_grp_vdj, seq_grp_vdj = group_sequences(
                     dat_vdj,
-                    junction_key=(
-                        key_[locusx] if isinstance(key_, dict) else key_
-                    ),
+                    junction_key=(key_[locusx] if isinstance(key_, dict) else key_),
                     recalculate_length=recalculate_length,
                     by_alleles=by_alleles,
                     locus=locusx,
@@ -158,9 +153,7 @@ def find_clones(
                     identity=identity_,
                     locus=locus_log[locusx],
                     chain="VDJ",
-                    junction_key=(
-                        key_[locusx] if isinstance(key_, dict) else key_
-                    ),
+                    junction_key=(key_[locusx] if isinstance(key_, dict) else key_),
                     verbose=verbose,
                 )
                 clone_dict_vdj = rename_clonotype_ids(
@@ -176,9 +169,7 @@ def find_clones(
             if dat_vj.shape[0] > 0:
                 vj_len_grp_vj, seq_grp_vj = group_sequences(
                     dat_vj,
-                    junction_key=(
-                        key_[locusx] if isinstance(key_, dict) else key_
-                    ),
+                    junction_key=(key_[locusx] if isinstance(key_, dict) else key_),
                     recalculate_length=recalculate_length,
                     by_alleles=by_alleles,
                     locus=locusx,
@@ -189,9 +180,7 @@ def find_clones(
                     identity=identity_,
                     locus=locus_log[locusx],
                     chain="VJ",
-                    junction_key=(
-                        key_[locusx] if isinstance(key_, dict) else key_
-                    ),
+                    junction_key=(key_[locusx] if isinstance(key_, dict) else key_),
                     verbose=verbose,
                 )
                 clone_dict_vj = rename_clonotype_ids(
@@ -271,9 +260,7 @@ def find_clones(
                 graph=graph_,
                 clone_key=clone_key,
             )
-            vdj_data.update_metadata(
-                reinitialize=True, clone_key=clone_key, **kwargs
-            )
+            vdj_data.update_metadata(reinitialize=True, clone_key=clone_key, **kwargs)
         vdj_data.threshold = threshold_
 
     else:
@@ -337,7 +324,7 @@ def transfer(
             adata.obs[x] = [str(x) for x in adata.obs[x]]
 
     if (overwrite is not None) and (overwrite is not True):
-        if not type(overwrite) is list:
+        if type(overwrite) is not list:
             overwrite = [overwrite]
         for ow in overwrite:
             adata.obs[ow] = pd.Series(dandelion.metadata[ow])
@@ -353,9 +340,7 @@ def transfer(
         distances = nx.to_pandas_adjacency(
             G, dtype=np.float32, weight="weight", nonedge=np.nan
         )
-        df_distances = distances.reindex(
-            index=adata.obs_names, columns=adata.obs_names
-        )
+        df_distances = distances.reindex(index=adata.obs_names, columns=adata.obs_names)
         # convert to connectivity
         distances = distances.apply(lambda x: np.maximum(1e-45, 1 / np.exp(x)))
         df_connectivities = distances.reindex(
@@ -408,9 +393,7 @@ def transfer(
                     adata.obsp[r_connectivities_key] = adata.uns[neighbors_key][
                         "connectivities"
                     ]
-                    adata.obsp[r_distances_key] = adata.uns[neighbors_key][
-                        "distances"
-                    ]
+                    adata.obsp[r_distances_key] = adata.uns[neighbors_key]["distances"]
 
         # always overwrite the bcr slots
         adata.obsp["connectivities"] = df_connectivities_.copy()
@@ -444,13 +427,9 @@ def transfer(
                     cell_indices[y][x].value = 1
             cell_indices = {
                 str(x): np.array(list(r))
-                for x, r in zip(
-                    range(0, len(cell_indices)), cell_indices.values()
-                )
+                for x, r in zip(range(0, len(cell_indices)), cell_indices.values())
             }
-            df_connectivities_ = np.zeros(
-                [len(cell_indices), len(cell_indices)]
-            )
+            df_connectivities_ = np.zeros([len(cell_indices), len(cell_indices)])
             np.fill_diagonal(df_connectivities_, 1)
             df_connectivities_ = csr_matrix(df_connectivities_)
 
@@ -468,13 +447,9 @@ def transfer(
     if dandelion.graph is not None:
         if dandelion.layout is not None:
             if expanded_only:
-                coord = pd.DataFrame.from_dict(
-                    dandelion.layout[1], orient="index"
-                )
+                coord = pd.DataFrame.from_dict(dandelion.layout[1], orient="index")
             else:
-                coord = pd.DataFrame.from_dict(
-                    dandelion.layout[0], orient="index"
-                )
+                coord = pd.DataFrame.from_dict(dandelion.layout[0], orient="index")
             for x in coord.columns:
                 tmp[x] = coord[x]
 
@@ -497,9 +472,7 @@ def transfer(
             ),
         )
     else:
-        logg.info(
-            " finished", time=start, deep=("updated `.obs` with `.metadata`\n")
-        )
+        logg.info(" finished", time=start, deep=("updated `.obs` with `.metadata`\n"))
 
 
 def define_clones(
@@ -626,9 +599,7 @@ def define_clones(
         outfile = outFolder / (vdj_path.stem + "_clone.tsv")
     else:
         out_FilePrefix = (
-            "dandelion_define_clones"
-            if outFilePrefix is None
-            else outFilePrefix
+            "dandelion_define_clones" if outFilePrefix is None else outFilePrefix
         )
         h_file1 = tmpFolder / (out_FilePrefix + "_heavy-clone.tsv")
         h_file2 = outFolder / (out_FilePrefix + "_heavy-clone.tsv")
@@ -636,9 +607,7 @@ def define_clones(
         outfile = outFolder / (out_FilePrefix + "_clone.tsv")
     write_airr(dat_h, h_file1)
     write_airr(dat_l, l_file)
-    v_field = (
-        "v_call_genotyped" if "v_call_genotyped" in dat.columns else "v_call"
-    )
+    v_field = "v_call_genotyped" if "v_call_genotyped" in dat.columns else "v_call"
     if dist is None:
         if isinstance(vdj_data, Dandelion):
             if vdj_data.threshold is not None:
@@ -709,8 +678,7 @@ def define_clones(
                     # if initial_dict[group] and cluster_dict[cluster] share common cells, add initial_dict[group] to
                     # cluster
                     if cluster != i and any(
-                        cell in initial_dict[group]
-                        for cell in cluster_dict[cluster]
+                        cell in initial_dict[group] for cell in cluster_dict[cluster]
                     ):
                         cluster_dict[cluster] = (
                             cluster_dict[cluster] + initial_dict[group]
@@ -724,9 +692,7 @@ def define_clones(
                 initial_dict = cluster_dict.copy()
 
         # invert cluster_dict for return
-        assign_dict = {
-            cell: k for k, v in cluster_dict.items() for cell in set(v)
-        }
+        assign_dict = {cell: k for k, v in cluster_dict.items() for cell in set(v)}
 
         return assign_dict
 
@@ -800,18 +766,10 @@ def define_clones(
             heavy_df[junction_length] = heavy_df[junction_length].astype("int")
             light_df[junction_length] = light_df[junction_length].astype("int")
         except:
-            heavy_df[junction_length] = heavy_df[junction_length].replace(
-                np.nan, pd.NA
-            )
-            light_df[junction_length] = light_df[junction_length].replace(
-                np.nan, pd.NA
-            )
-            heavy_df[junction_length] = heavy_df[junction_length].astype(
-                "Int64"
-            )
-            light_df[junction_length] = light_df[junction_length].astype(
-                "Int64"
-            )
+            heavy_df[junction_length] = heavy_df[junction_length].replace(np.nan, pd.NA)
+            light_df[junction_length] = light_df[junction_length].replace(np.nan, pd.NA)
+            heavy_df[junction_length] = heavy_df[junction_length].astype("Int64")
+            light_df[junction_length] = light_df[junction_length].astype("Int64")
 
         # filter multiple heavy chains
         if doublets == "drop":
@@ -861,9 +819,7 @@ def define_clones(
         heavy_df[clone_id] = (
             heavy_df[clone_id]
             + "_"
-            + heavy_df.apply(
-                lambda row: str(cluster_dict[row[cell_id]]), axis=1
-            )
+            + heavy_df.apply(lambda row: str(cluster_dict[row[cell_id]]), axis=1)
         )
 
         # write heavy chains
@@ -871,7 +827,7 @@ def define_clones(
         return (heavy_df, light_df)
 
     logg.info("Running command: %s\n" % (" ".join(cmd)))
-    run(cmd)
+    run(cmd, check=False)
 
     h_df, l_df = _lightCluster(
         h_file2, l_file, outfile, doublets=doublets, fileformat=fileformat
@@ -903,9 +859,7 @@ def define_clones(
         germline_ = vdj_data.germline if vdj_data.germline is not None else None
         layout_ = vdj_data.layout if vdj_data.layout is not None else None
         graph_ = vdj_data.graph if vdj_data.graph is not None else None
-        threshold_ = (
-            vdj_data.threshold if vdj_data.threshold is not None else None
-        )
+        threshold_ = vdj_data.threshold if vdj_data.threshold is not None else None
         if ("clone_id" in vdj_data.data) and (clone_key is not None):
             vdj_data.__init__(
                 data=dat_,
@@ -973,13 +927,9 @@ def tabuluate_clone_sizes(
                     for y in [
                         (
                             sorted(
-                                list(
-                                    {clonesize_dict[c_] for c_ in c.split("|")}
-                                ),
+                                list({clonesize_dict[c_] for c_ in c.split("|")}),
                                 key=lambda x: (
-                                    int(x.split(">= ")[1])
-                                    if type(x) is str
-                                    else int(x)
+                                    int(x.split(">= ")[1]) if type(x) is str else int(x)
                                 ),
                                 reverse=True,
                             )[0]
@@ -1042,9 +992,7 @@ def clone_size(
 
     col_key, col_key_suffix = "", ""
     col_key = str(clonekey) if key_added is None else key_added
-    col_key_suffix = (
-        "_size" if max_size is None else "_size_max_" + str(max_size)
-    )
+    col_key_suffix = "_size" if max_size is None else "_size_max_" + str(max_size)
 
     vdj_data.metadata[col_key + col_key_suffix] = tabuluate_clone_sizes(
         metadata_, clonesize_dict, clonekey
@@ -1065,10 +1013,7 @@ def clone_size(
     logg.info(
         " finished",
         time=start,
-        deep=(
-            "Updated Dandelion object: \n"
-            "   'metadata', cell-indexed clone table"
-        ),
+        deep=("Updated Dandelion object: \n   'metadata', cell-indexed clone table"),
     )
 
 
@@ -1179,7 +1124,7 @@ def clone_overlap(
         logg.info(
             " finished",
             time=start,
-            deep=("Updated AnnData: \n" "   'uns', clone overlap table"),
+            deep=("Updated AnnData: \n   'uns', clone overlap table"),
         )
     else:
         return overlap
@@ -1195,9 +1140,7 @@ def clustering(
     # for every pair of i1,i2 is their dictance smaller than the thresholdeshold?
     i_pair_d = {
         (i1, i2): (
-            distance_dict[(i1, i2)] <= threshold
-            if (i1, i2) in distance_dict
-            else False
+            distance_dict[(i1, i2)] <= threshold if (i1, i2) in distance_dict else False
         )
         for i1, i2 in product(i_unique, repeat=2)
     }
@@ -1221,10 +1164,9 @@ def clustering(
             elif (ii2, ii1) in distance_dict:
                 canbetogether[ii2].append((ii2, ii1))
                 canbetogether[ii1].append((ii2, ii1))
-        else:
-            if (ii1, ii2) or (ii2, ii1) in distance_dict:
-                canbetogether[ii1].append(())
-                canbetogether[ii2].append(())
+        elif (ii1, ii2) or (ii2, ii1) in distance_dict:
+            canbetogether[ii1].append(())
+            canbetogether[ii2].append(())
     for x in canbetogether:
         canbetogether[x] = list({y for y in canbetogether[x] if len(y) > 0})
     # convert the indices to sequences
@@ -1233,12 +1175,7 @@ def clustering(
             out_dict[sequences_dict[x]] = tuple(
                 sorted(
                     set(
-                        list(
-                            [
-                                sequences_dict[y]
-                                for y in flatten(canbetogether[x])
-                            ]
-                        )
+                        list([sequences_dict[y] for y in flatten(canbetogether[x])])
                         + [sequences_dict[x]]
                     )
                 )
@@ -1279,9 +1216,7 @@ def productive_ratio(
     start = logg.info("Tabulating productive ratio")
     vdjx = vdj[(vdj.data.cell_id.isin(adata.obs_names))].copy()
     if "ambiguous" in vdjx.data:
-        tmp = vdjx[
-            (vdjx.data.locus == locus) & (vdjx.data.ambiguous == "F")
-        ].copy()
+        tmp = vdjx[(vdjx.data.locus == locus) & (vdjx.data.ambiguous == "F")].copy()
     else:
         tmp = vdjx[(vdjx.data.locus == locus)].copy()
 
@@ -1331,7 +1266,7 @@ def productive_ratio(
     logg.info(
         " finished",
         time=start,
-        deep=("Updated AnnData: \n" "   'uns', productive_ratio"),
+        deep=("Updated AnnData: \n   'uns', productive_ratio"),
     )
 
 
@@ -1386,9 +1321,7 @@ def vj_usage_pca(
     """
     start = logg.info("Computing PCA for V/J gene usage")
     if allowed_chain_status is not None:
-        adata_ = adata[
-            adata.obs["chain_status"].isin(allowed_chain_status)
-        ].copy()
+        adata_ = adata[adata.obs["chain_status"].isin(allowed_chain_status)].copy()
 
     if groups is not None:
         adata_ = adata_[adata_.obs[group].isin(groups)].copy()
@@ -1462,9 +1395,7 @@ def vj_usage_pca(
             vdj_df.loc[cell, vj_v] = counter1[vj_v]
 
         counter2 = Counter(
-            adata_.obs.loc[
-                adata_.obs[groupby] == cell, "j_call_" + mode + "_VJ"
-            ]
+            adata_.obs.loc[adata_.obs[groupby] == cell, "j_call_" + mode + "_VJ"]
         )
         for vj_j in vj_j_list:
             vdj_df.loc[cell, vj_j] = counter2[vj_j]
@@ -1475,9 +1406,7 @@ def vj_usage_pca(
         for vdj_v in vdj_v_list:
             vdj_df.loc[cell, vdj_v] = counter3[vdj_v]
         counter5 = Counter(
-            adata_.obs.loc[
-                adata_.obs[groupby] == cell, "j_call_" + mode + "_VDJ"
-            ]
+            adata_.obs.loc[adata_.obs[groupby] == cell, "j_call_" + mode + "_VDJ"]
         )
         for vdj_j in vdj_j_list:
             vdj_df.loc[cell, vdj_j] = counter5[vdj_j]
@@ -1511,20 +1440,16 @@ def vj_usage_pca(
     vdj_df_adata.obs["cell_count"] = pd.Series(
         dict(zip(df1[groupby], df1["cellcount"]))
     )
-    sc.pp.pca(
-        vdj_df_adata, n_comps=n_comps, use_highly_variable=False, **kwargs
-    )
+    sc.pp.pca(vdj_df_adata, n_comps=n_comps, use_highly_variable=False, **kwargs)
     if transfer_mapping is not None:
         collapsed_obs = adata_.obs.drop_duplicates(subset=groupby)
         for to in transfer_mapping:
             transfer_dict = dict(zip(collapsed_obs[groupby], collapsed_obs[to]))
-            vdj_df_adata.obs[to] = [
-                transfer_dict[x] for x in vdj_df_adata.obs_names
-            ]
+            vdj_df_adata.obs[to] = [transfer_dict[x] for x in vdj_df_adata.obs_names]
     logg.info(
         " finished",
         time=start,
-        deep=("Returned AnnData: \n" "   'obsm', X_pca for V/J gene usage"),
+        deep=("Returned AnnData: \n   'obsm', X_pca for V/J gene usage"),
     )
     return vdj_df_adata
 
@@ -1820,18 +1745,14 @@ def refine_clone_assignment(
         bar_format="{l_bar}{bar:10}{r_bar}{bar:-10b}",
         disable=not verbose,
     ):
-        suffix = [
-            clone_dict_vj[x] for x in seqcellclonetree[c] if x in clone_dict_vj
-        ]
+        suffix = [clone_dict_vj[x] for x in seqcellclonetree[c] if x in clone_dict_vj]
         fintree[c] = []
         if len(suffix) > 0:
             for cl in cellclonetree[c]:
                 if present(cl):
                     for s in suffix:
                         if check_same_celltype(cl, s):
-                            fintree[c].append(
-                                cl + "_" + "".join(s.split("_", 1)[1])
-                            )
+                            fintree[c].append(cl + "_" + "".join(s.split("_", 1)[1]))
                         else:
                             fintree[c].append(cl + "|" + s)
         else:

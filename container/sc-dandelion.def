@@ -1,6 +1,6 @@
 Bootstrap: docker
 
-From: ubuntu:latest
+From: ubuntu:trixie
 
 %setup
     if [ ! -d /share ]; then

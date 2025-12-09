@@ -1,8 +1,8 @@
+from collections.abc import Sequence
+
 import numpy as np
 import pandas as pd
-
-from scipy.sparse import spmatrix, sparray
-from typing import Sequence
+from scipy.sparse import sparray, spmatrix
 
 # from https://github.com/scverse/anndata/blob/53537b5219ff82cbdee96b7733172fb114e80ca8/src/anndata/compat/__init__.py#L48-L49
 Index1D = slice | int | str | np.int64 | np.ndarray

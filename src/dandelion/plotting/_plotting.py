@@ -1,4 +1,9 @@
 #!/usr/bin/env python
+from collections.abc import Callable
+from itertools import cycle, product
+from time import sleep
+from typing import Literal
+
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import networkx as nx
@@ -6,9 +11,7 @@ import numpy as np
 import nxviz as nxv
 import pandas as pd
 import seaborn as sns
-
 from anndata import AnnData
-from itertools import product, cycle
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from nxviz import annotate
@@ -26,9 +29,7 @@ from plotnine import (
 )
 from scanpy.plotting import palettes
 from scanpy.plotting._tools.scatterplots import embedding
-from time import sleep
 from tqdm import tqdm
-from typing import Callable, Literal
 
 from dandelion.tools._diversity import rarefun
 from dandelion.utilities._core import *
@@ -112,9 +113,7 @@ def clone_rarefaction(
     # remove those with no counts
     print(
         "removing due to zero counts:",
-        ", ".join(
-            [res_.index[i] for i, x in enumerate(res_.sum(axis=1) == 0) if x]
-        ),
+        ", ".join([res_.index[i] for i, x in enumerate(res_.sum(axis=1) == 0) if x]),
     )
     sleep(0.5)
     res_ = res_[~(res_.sum(axis=1) == 0)]
@@ -535,9 +534,7 @@ def stackedbarplot(
         for i in range(0, n_df * n_col, n_col):  # len(h) = n_col * n_df
             for j, pa in enumerate(h[i : i + n_col]):
                 for rect in pa.patches:  # for each index
-                    rect.set_x(
-                        rect.get_x() + 1 / float(n_df + 1) * i / float(n_col)
-                    )
+                    rect.set_x(rect.get_x() + 1 / float(n_df + 1) * i / float(n_col))
                     rect.set_hatch(H * int(i / n_col))  # edited part
                     rect.set_width(1 / float(n_df + 1))
         ax.set_xticks((np.arange(0, 2 * n_ind, 2) + 1 / float(n_df + 1)) / 2.0)
@@ -588,9 +585,7 @@ def stackedbarplot(
         return fig, ax
 
     if title is None:
-        title = (
-            "multiple stacked bar plot : " + color.replace("_", " ") + " usage"
-        )
+        title = "multiple stacked bar plot : " + color.replace("_", " ") + " usage"
     else:
         title = title
 
@@ -761,9 +756,7 @@ def spectratype(
         for i in range(0, n_df * n_col, n_col):  # len(h) = n_col * n_df
             for j, pa in enumerate(h[i : i + n_col]):
                 for rect in pa.patches:  # for each index
-                    rect.set_x(
-                        rect.get_x() + 1 / float(n_df + 1) * i / float(n_col)
-                    )
+                    rect.set_x(rect.get_x() + 1 / float(n_df + 1) * i / float(n_col))
                     rect.set_hatch(H * int(i / n_col))  # edited part
                     # need to see if there's a better way to toggle this.
                     rect.set_width(wdth)
@@ -930,12 +923,7 @@ def clone_overlap(
                     y + ({str(clone_): x},)
                     for y in list(
                         product(
-                            [
-                                i
-                                for i in overlap.loc[x][
-                                    overlap.loc[x] > 0
-                                ].index
-                            ],
+                            [i for i in overlap.loc[x][overlap.loc[x] > 0].index],
                             repeat=2,
                         )
                     )
@@ -982,12 +970,7 @@ def clone_overlap(
                     )
                     for y in list(
                         product(
-                            [
-                                i
-                                for i in overlap.loc[x][
-                                    overlap.loc[x] > 0
-                                ].index
-                            ],
+                            [i for i in overlap.loc[x][overlap.loc[x] > 0].index],
                             repeat=2,
                         )
                     )
@@ -1033,21 +1016,13 @@ def clone_overlap(
                 pal = cycle(palettes.default_28)
             else:
                 pal = cycle(palettes.default_102)
-            colorby_dict = dict(
-                zip(list(adata.obs[str(colorby)].unique()), pal)
-            )
+            colorby_dict = dict(zip(list(adata.obs[str(colorby)].unique()), pal))
+    elif type(color_mapping) is dict:
+        colorby_dict = color_mapping
+    elif pd.api.types.is_categorical_dtype(data[groupby]):
+        colorby_dict = dict(zip(list(data[str(colorby)].cat.categories), color_mapping))
     else:
-        if type(color_mapping) is dict:
-            colorby_dict = color_mapping
-        else:
-            if pd.api.types.is_categorical_dtype(data[groupby]):
-                colorby_dict = dict(
-                    zip(list(data[str(colorby)].cat.categories), color_mapping)
-                )
-            else:
-                colorby_dict = dict(
-                    zip(sorted(list(set(data[str(colorby)]))), color_mapping)
-                )
+        colorby_dict = dict(zip(sorted(list(set(data[str(colorby)]))), color_mapping))
     df = data[[groupby, colorby]]
     if groupby == colorby:
         df = data[[groupby]]
@@ -1135,13 +1110,9 @@ def productive_ratio(
     ax = sns.barplot(
         x=groupby, y="productive+non-productive", data=res, color=palette[0]
     )
-    ax = sns.barplot(
-        x=groupby, y="productive", data=res, color=palette[1], ax=ax
-    )
+    ax = sns.barplot(x=groupby, y="productive", data=res, color=palette[1], ax=ax)
     legend = [
-        mpatches.Patch(
-            color=palette[0], label="% with non-productive " + locus
-        ),
+        mpatches.Patch(color=palette[0], label="% with non-productive " + locus),
         mpatches.Patch(color=palette[1], label="% with productive " + locus),
     ]
     plt.xticks(fontsize=fontsize, rotation=rotation)

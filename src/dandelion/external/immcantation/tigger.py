@@ -1,7 +1,8 @@
 from pathlib import Path
-from scanpy import logging as logg
 from subprocess import run
 from typing import Literal
+
+from scanpy import logging as logg
 
 from dandelion.utilities._utilities import set_germline_env
 
@@ -103,4 +104,4 @@ def tigger_genotype(
 
     print("      Reassigning alleles")
     logg.info("Running command: %s\n" % (" ".join(cmd)))
-    run(cmd, env=env)  # logs are printed to terminal
+    run(cmd, check=False, env=env)  # logs are printed to terminal

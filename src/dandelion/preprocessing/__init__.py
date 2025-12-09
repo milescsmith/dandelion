@@ -1,4 +1,9 @@
 #!/usr/bin/env python
+from dandelion.external.immcantation.shazam import (
+    calculate_threshold,
+    quantify_mutations,
+)
+from dandelion.external.scanpy import recipe_scanpy_qc
 from dandelion.preprocessing._preprocessing import (
     assign_isotype,
     assign_isotypes,
@@ -10,12 +15,6 @@ from dandelion.preprocessing._preprocessing import (
     reannotate_genes,
     reassign_alleles,
 )
-from dandelion.external.immcantation.shazam import (
-    calculate_threshold,
-    quantify_mutations,
-)
-
-from dandelion.external.scanpy import recipe_scanpy_qc
 
 __all__ = [
     "assign_isotype",

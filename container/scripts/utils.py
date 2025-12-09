@@ -1,5 +1,7 @@
 from collections import defaultdict
+from io import TextIOWrapper
 from pathlib import Path
+from collections.abc import Generator
 
 
 class Tree(defaultdict):
@@ -9,8 +11,9 @@ class Tree(defaultdict):
         super().__init__(Tree)
         self.value = value
 
-
-def fasta_iterator(fh: str | Path) -> tuple[str, str]:
+# not sure why this is typed as a str or Path when 
+# neither has a `readline` method
+def fasta_iterator(fh: TextIOWrapper) -> Generator[tuple[str, str]]:
     """
     Read in a fasta file as an iterator.
 

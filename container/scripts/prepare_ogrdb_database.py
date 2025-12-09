@@ -1,3 +1,5 @@
+#! /usr/local/bin/python
+
 import argparse
 import json
 import logging
@@ -93,7 +95,7 @@ def download_ogrdb_set_fasta(set_id: str):
         return None
 
 
-def return_ogrdb_info(species: str) -> tuple[list[str], dict[str, str]]:
+def return_ogrdb_info(species: str) -> tuple[list[str], dict[str, str]] | None:
     """
     Return the info required from ogrdb set.
 
@@ -109,11 +111,14 @@ def return_ogrdb_info(species: str) -> tuple[list[str], dict[str, str]]:
     """
     query_sets = query_ogrdb_set_info(species)
     set_ids, set_subgroup = [], {}
-    for s in query_sets:
-        if s["germline_set_id"] not in set_ids:
-            set_ids.append(s["germline_set_id"])
-        set_subgroup.update({s["germline_set_id"]: s["species_subgroup"]})
-    return set_ids, set_subgroup
+    if query_sets is not None:
+        for s in query_sets:
+            if s["germline_set_id"] not in set_ids:
+                set_ids.append(s["germline_set_id"])
+            set_subgroup.update({s["germline_set_id"]: s["species_subgroup"]})
+        return set_ids, set_subgroup
+    else:
+        return None
 
 
 def copy_ogrdb_aux_to_igblast(
@@ -144,7 +149,7 @@ def copy_ogrdb_aux_to_igblast(
 
 def download_germline_and_process(
     species: str,
-    file_path: str | Path,
+    file_path: Path,
 ):
     """
     Download sequence from imgt and write to fasta file.
@@ -156,37 +161,40 @@ def download_germline_and_process(
     file_path : str | Path
         Path to write fasta file to.
     """
-    if os.path.exists(file_path / "vdj"):
-        logging.info(f"Skipping download of files as it already exists.")
+    if file_path.joinpath("vdj").exists():
+        logging.info("Skipping download of files as it already exists.")
         return
-    set_ids, _ = return_ogrdb_info(species)
-    for set_id in set_ids:
-        content, file_name = download_ogrdb_set_fasta(set_id)
-        new_file_name = set_id + ".fasta"
-        # Stop if the file already exists
-        if os.path.exists(file_path / set_id):
-            logging.info(
-                f"Skipping download of {file_name} as it already exists."
-            )
-            return
-        # Check if the downloaded content is empty
-        if content.rstrip() == "":
-            logging.warning(
-                f"Downloaded content for {url} is empty. Skipping processing."
-            )
-            fh = open(new_file_name, "w")
-            fh.close()
-            return
-        # Remove empty lines
-        content_lines = [line for line in content.splitlines() if line.strip()]
 
-        content = "\n".join(content_lines)
-        logging.info(f"Downloading {file_name}.")
-        with open(file_path / new_file_name, "w") as output_file:
-            output_file.write(content)
+    if (ids := return_ogrdb_info(species)) is not None:
+        set_ids, _ = ids
+        for set_id in set_ids:
+            if (ogrdb_download := download_ogrdb_set_fasta(set_id)) is not None:
+                content, file_name = ogrdb_download
+                new_file_name = set_id + ".fasta"
+                # Stop if the file already exists
+                if file_path.joinpath(set_id).exists():
+                    logging.info(
+                        f"Skipping download of {file_name} as it already exists."
+                    )
+                    return
+                # Check if the downloaded content is empty
+                if content.rstrip() == "":
+                    logging.warning(
+                        f"Downloaded content for {content} is empty. Skipping processing."  # guessing here, not sure where `url` was supposed to come from
+                    )
+                    fh = open(new_file_name, "w")
+                    fh.close()
+                    return
+                # Remove empty lines
+                content_lines = [line for line in content.splitlines() if line.strip()]
+
+                content = "\n".join(content_lines)
+                logging.info(f"Downloading {file_name}.")
+                with open(file_path / new_file_name, "w") as output_file:
+                    output_file.write(content)
 
 
-def process_ogrdb_fasta(species: str, file_path: str | Path):
+def process_ogrdb_fasta(species: str, file_path: Path):
     """
     Process the downloaded fasta files so that it's in the correct format for igblast.
 
@@ -198,8 +206,8 @@ def process_ogrdb_fasta(species: str, file_path: str | Path):
         Path to write fasta file to.
     """
     new_file_path = file_path / "vdj"
-    if os.path.exists(new_file_path):
-        logging.info(f"Skipping download of files as it already exists.")
+    if new_file_path.exists():
+        logging.info("Skipping download of files as it already exists.")
         return
     # generate the split v/d/j files
     # find the "all" file first
@@ -207,40 +215,39 @@ def process_ogrdb_fasta(species: str, file_path: str | Path):
         all_v_seqs, all_j_seqs = {}, {}
         for file in sorted(file_path.iterdir()):
             if file.is_file():
-                _, subgroups = return_ogrdb_info(species)
-                if file.stat().st_size != 0:
-                    set_id = file.stem
-                    strain = re.sub("\\/| ", "_", subgroups[set_id])
-                    strain = "all" if strain == "" else strain
-                    if strain == "all":
-                        fh = open(file)
-                        for header, sequence in fasta_iterator(fh):
-                            locus, gene = header[:3], header[3]
-                            if gene == "V":
-                                if header not in all_v_seqs:
-                                    all_v_seqs[header] = sequence
-                            if gene == "J":
-                                if header not in all_j_seqs:
-                                    all_j_seqs[header] = sequence
-                        fh.close()
+                if (ogrdb_return := return_ogrdb_info(species)) is not None:
+                    _, subgroups = ogrdb_return
+                    if file.stat().st_size != 0:
+                        set_id = file.stem
+                        strain = re.sub("\\/| ", "_", subgroups[set_id])
+                        strain = "all" if strain == "" else strain
+                        if strain == "all":
+                            with file.open() as fh:
+                                for header, sequence in fasta_iterator(fh):
+                                    locus, gene = header[:3], header[3]
+                                    if gene == "V":
+                                        if header not in all_v_seqs:
+                                            all_v_seqs[header] = sequence
+                                    if gene == "J":
+                                        if header not in all_j_seqs:
+                                            all_j_seqs[header] = sequence
     new_file_path.mkdir(parents=True, exist_ok=True)
     for file in sorted(file_path.iterdir()):
         if file.is_file():
             v_seqs, d_seqs, j_seqs = {}, {}, {}
             if file.stat().st_size != 0:
-                fh = open(file)
-                for header, sequence in fasta_iterator(fh):
-                    locus, gene = header[:3], header[3]
-                    if gene == "V":
-                        if header not in v_seqs:
-                            v_seqs[header] = sequence
-                    if gene == "D":
-                        if header not in d_seqs:
-                            d_seqs[header] = sequence
-                    if gene == "J":
-                        if header not in j_seqs:
-                            j_seqs[header] = sequence
-                fh.close()
+                with file.open() as fh:
+                    for header, sequence in fasta_iterator(fh):
+                        locus, gene = header[:3], header[3]
+                        if gene == "V":
+                            if header not in v_seqs:
+                                v_seqs[header] = sequence
+                        if gene == "D":
+                            if header not in d_seqs:
+                                d_seqs[header] = sequence
+                        if gene == "J":
+                            if header not in j_seqs:
+                                j_seqs[header] = sequence
                 # make a grouped one for mice.
                 if len(v_seqs) > 0:
                     write_fasta(
@@ -260,92 +267,92 @@ def process_ogrdb_fasta(species: str, file_path: str | Path):
             if species == "human":
                 file.unlink()
     if species == "mouse":
-        _, subgroups = return_ogrdb_info(species)
-        for file in sorted(file_path.iterdir()):
-            if file.is_file():
-                set_id = file.stem
-                strain = re.sub("\\/| ", "_", subgroups[set_id])
-                strain = "all" if strain == "" else strain
-                if strain != "all":
-                    v_seqs, d_seqs, j_seqs = {}, {}, {}
-                    if file.stat().st_size != 0:
-                        fh = open(file)
-                        for header, sequence in fasta_iterator(fh):
-                            locus, gene = header[:3], header[3]
-                            if gene == "V":
-                                if header not in v_seqs:
-                                    v_seqs[header] = sequence
-                            if gene == "D":
-                                if header not in d_seqs:
-                                    d_seqs[header] = sequence
-                            if gene == "J":
-                                if header not in j_seqs:
-                                    j_seqs[header] = sequence
-                        v_seqs.update(all_v_seqs)
-                        j_seqs.update(all_j_seqs)
-                        if len(v_seqs) > 0:
-                            write_fasta(
-                                v_seqs,
-                                new_file_path
-                                / f"ogrdb_{species}_{strain}_{locus}V.fasta",
-                            )
-                            if strain in MERGE_STRAINS:
-                                _strain = MERGE_STRAINS_DICT[strain]
-                                write_fasta(
-                                    v_seqs,
-                                    new_file_path
-                                    / f"ogrdb_{species}_{_strain}_{locus}V.fasta",
-                                )
-                        else:
-                            fh1 = open(
-                                new_file_path
-                                / f"ogrdb_{species}_{strain}_{locus}V.fasta",
-                                "w",
-                            )
-                            fh1.close()
-                        if len(d_seqs) > 0:
-                            write_fasta(
-                                d_seqs,
-                                new_file_path
-                                / f"ogrdb_{species}_{strain}_{locus}D.fasta",
-                            )
-                            if strain in MERGE_STRAINS:
-                                _strain = MERGE_STRAINS_DICT[strain]
-                                write_fasta(
-                                    d_seqs,
-                                    new_file_path
-                                    / f"ogrdb_{species}_{_strain}_{locus}D.fasta",
-                                )
-                        else:
-                            if locus == "IGH":
-                                fh1 = open(
-                                    new_file_path
-                                    / f"ogrdb_{species}_{strain}_{locus}D.fasta",
-                                    "w",
-                                )
-                                fh1.close()
-                        if len(j_seqs) > 0:
-                            write_fasta(
-                                j_seqs,
-                                new_file_path
-                                / f"ogrdb_{species}_{strain}_{locus}J.fasta",
-                            )
-                            if strain in MERGE_STRAINS:
-                                _strain = MERGE_STRAINS_DICT[strain]
-                                write_fasta(
-                                    j_seqs,
-                                    new_file_path
-                                    / f"ogrdb_{species}_{_strain}_{locus}J.fasta",
-                                )
-                        else:
-                            fh1 = open(
-                                new_file_path
-                                / f"ogrdb_{species}_{strain}_{locus}J.fasta",
-                                "w",
-                            )
-                            fh1.close()
-                        fh.close()
-                file.unlink()
+        if (ogrdb_return := return_ogrdb_info(species)) is not None:
+            _, subgroups = ogrdb_return
+            for file in sorted(file_path.iterdir()):
+                if file.is_file():
+                    set_id = file.stem
+                    strain = re.sub("\\/| ", "_", subgroups[set_id])
+                    strain = "all" if strain == "" else strain
+                    if strain != "all":
+                        v_seqs, d_seqs, j_seqs = {}, {}, {}
+                        if file.stat().st_size != 0:
+                            with file.open() as fh:
+                                for header, sequence in fasta_iterator(fh):
+                                    locus, gene = header[:3], header[3]
+                                    if gene == "V":
+                                        if header not in v_seqs:
+                                            v_seqs[header] = sequence
+                                    if gene == "D":
+                                        if header not in d_seqs:
+                                            d_seqs[header] = sequence
+                                    if gene == "J":
+                                        if header not in j_seqs:
+                                            j_seqs[header] = sequence
+                                v_seqs.update(all_v_seqs)
+                                j_seqs.update(all_j_seqs)
+                                if len(v_seqs) > 0:
+                                    write_fasta(
+                                        v_seqs,
+                                        new_file_path
+                                        / f"ogrdb_{species}_{strain}_{locus}V.fasta",
+                                    )
+                                    if strain in MERGE_STRAINS:
+                                        _strain = MERGE_STRAINS_DICT[strain]
+                                        write_fasta(
+                                            v_seqs,
+                                            new_file_path
+                                            / f"ogrdb_{species}_{_strain}_{locus}V.fasta",
+                                        )
+                                else:
+                                    fh1 = open(
+                                        new_file_path
+                                        / f"ogrdb_{species}_{strain}_{locus}V.fasta",
+                                        "w",
+                                    )
+                                    fh1.close()
+                                if len(d_seqs) > 0:
+                                    write_fasta(
+                                        d_seqs,
+                                        new_file_path
+                                        / f"ogrdb_{species}_{strain}_{locus}D.fasta",
+                                    )
+                                    if strain in MERGE_STRAINS:
+                                        _strain = MERGE_STRAINS_DICT[strain]
+                                        write_fasta(
+                                            d_seqs,
+                                            new_file_path
+                                            / f"ogrdb_{species}_{_strain}_{locus}D.fasta",
+                                        )
+                                else:
+                                    if locus == "IGH":
+                                        fh1 = open(
+                                            new_file_path
+                                            / f"ogrdb_{species}_{strain}_{locus}D.fasta",
+                                            "w",
+                                        )
+                                        fh1.close()
+                                if len(j_seqs) > 0:
+                                    write_fasta(
+                                        j_seqs,
+                                        new_file_path
+                                        / f"ogrdb_{species}_{strain}_{locus}J.fasta",
+                                    )
+                                    if strain in MERGE_STRAINS:
+                                        _strain = MERGE_STRAINS_DICT[strain]
+                                        write_fasta(
+                                            j_seqs,
+                                            new_file_path
+                                            / f"ogrdb_{species}_{_strain}_{locus}J.fasta",
+                                        )
+                                else:
+                                    fh1 = open(
+                                        new_file_path
+                                        / f"ogrdb_{species}_{strain}_{locus}J.fasta",
+                                        "w",
+                                    )
+                                    fh1.close()
+                    file.unlink()
 
 
 def main():
@@ -402,9 +409,7 @@ def main():
         for file in sorted(file_path.iterdir()):
             file_code = file.stem.rsplit("_", 1)[1].lower()
             chain, segment = file_code[:2], file_code[3]
-            out_filename = (
-                igblast_out / f"ogrdb_{species}_{chain}_{segment}.fasta"
-            )
+            out_filename = igblast_out / f"ogrdb_{species}_{chain}_{segment}.fasta"
             file_tree[chain + segment][file].value = 1
             out_filename_tree[chain + segment][out_filename].value = 1
             if species == "mouse":
@@ -415,9 +420,7 @@ def main():
                         / f"ogrdb_{species}_{strain}_{chain}_{segment}.fasta"
                     )
                     file_tree[chain + segment + strain][file].value = 1
-                    out_filename_tree[chain + segment + strain][
-                        out_filename
-                    ].value = 1
+                    out_filename_tree[chain + segment + strain][out_filename].value = 1
         for chain_segment in file_tree:
             in_files = list(file_tree[chain_segment])
             out_file = list(out_filename_tree[chain_segment])[0]
@@ -429,9 +432,7 @@ def main():
                     fh = open(file)
                     for header, sequence in fasta_iterator(fh):
                         if header not in seqs:
-                            seqs[header] = (
-                                sequence.replace(".", "").upper().rstrip()
-                            )
+                            seqs[header] = sequence.replace(".", "").upper().rstrip()
                     fh.close()
             write_fasta(seqs, out_file)
     logging.info("Preparing auxiliary files for igblast")

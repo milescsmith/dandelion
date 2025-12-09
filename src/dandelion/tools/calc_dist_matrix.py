@@ -1,16 +1,14 @@
-import numpy as np
-from scipy.spatial.distance import pdist, squareform
-from polyleven import levenshtein
-from tqdm import tqdm
-from dask import delayed, compute
 import dask
+import numpy as np
+from dask import compute, delayed
+from polyleven import levenshtein
+from scipy.spatial.distance import pdist, squareform
+from tqdm import tqdm
 
 
 def compute_chunk_distances(chunk):
     """Compute pairwise distances for a chunk of sequences."""
-    return squareform(
-        pdist(chunk.reshape(-1, 1), lambda x, y: levenshtein(x[0], y[0]))
-    )
+    return squareform(pdist(chunk.reshape(-1, 1), lambda x, y: levenshtein(x[0], y[0])))
 
 
 def parallel_levenshtein_matrix(sequences, n_chunks=400):
@@ -30,9 +28,7 @@ def parallel_levenshtein_matrix(sequences, n_chunks=400):
     chunks = np.array_split(sequences, n_chunks)
 
     # Create delayed computations
-    delayed_results = [
-        delayed(compute_chunk_distances)(chunk) for chunk in chunks
-    ]
+    delayed_results = [delayed(compute_chunk_distances)(chunk) for chunk in chunks]
 
     # Execute computations in parallel
     results = compute(*delayed_results)

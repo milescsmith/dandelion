@@ -1,18 +1,19 @@
 from pathlib import Path
-from scanpy import logging as logg
 from subprocess import run
 from typing import Literal
 
+from scanpy import logging as logg
+
 from dandelion.utilities._utilities import (
+    NO_DS,
     set_germline_env,
     set_igblast_env,
-    NO_DS,
 )
 
 
 def assigngenes_igblast(
-    fasta: Path | str,
-    igblast_db: Path | str | None = None,
+    fasta: Path,
+    igblast_db: Path | None = None,
     org: Literal["human", "mouse"] = "human",
     loci: Literal["ig", "tr"] = "ig",
     additional_args: list[str] = [],
@@ -22,9 +23,9 @@ def assigngenes_igblast(
 
     Parameters
     ----------
-    fasta : Path | str
+    fasta : Path
         path to fasta file for reannotation.
-    igblast_db : Path | str | None, optional
+    igblast_db : Path | None, optional
         path to igblast database.
     org : Literal["human", "mouse"], optional
         organism for germline sequences.
@@ -59,7 +60,7 @@ def assigngenes_igblast(
         ]
         cmd += additional_args
         logg.info("Running command: %s\n" % (" ".join(cmd)))
-        run(cmd, env=env)  # logs are printed to terminal
+        run(cmd, check=False, env=env)  # logs are printed to terminal
 
 
 def makedb_igblast(
@@ -138,7 +139,7 @@ def makedb_igblast(
     for add_cmd in [[], ["--failed"]]:
         cmd = cmd + add_cmd + additional_args
         logg.info("Running command: %s\n" % (" ".join(cmd)))
-        run(cmd, env=env)  # logs are printed to terminal
+        run(cmd, check=False, env=env)  # logs are printed to terminal
 
 
 def parsedb_heavy(airr_file: Path | str):
@@ -168,7 +169,7 @@ def parsedb_heavy(airr_file: Path | str):
     ]
 
     logg.info("Running command: %s\n" % (" ".join(cmd)))
-    run(cmd)  # logs are printed to terminal
+    run(cmd, check=False)  # logs are printed to terminal
 
 
 def parsedb_light(airr_file: Path | str):
@@ -198,7 +199,7 @@ def parsedb_light(airr_file: Path | str):
     ]
 
     logg.info("Running command: %s\n" % (" ".join(cmd)))
-    run(cmd)  # logs are printed to terminal
+    run(cmd, check=False)  # logs are printed to terminal
 
 
 def creategermlines(
@@ -327,4 +328,4 @@ def creategermlines(
     cmd = cmd + gml_ref + additional_args
 
     logg.info("Running command: %s\n" % (" ".join(cmd)))
-    run(cmd, env=env)  # logs are printed to terminal
+    run(cmd, check=False, env=env)  # logs are printed to terminal

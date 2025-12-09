@@ -1,8 +1,7 @@
 import warnings
+from typing import Literal
 
 import pandas as pd
-
-from typing import Literal
 
 from dandelion.utilities._core import Dandelion
 from dandelion.utilities._utilities import (
@@ -89,9 +88,9 @@ def identical_clones(
         if True removes extra contigs flagged by `check_contigs`.
     """
     try:
-        from rpy2.robjects.packages import importr
         from rpy2.rinterface import NULL
         from rpy2.robjects import r
+        from rpy2.robjects.packages import importr
     except:
         raise (
             ImportError(
@@ -233,9 +232,9 @@ def hierarchical_clones(
         if True removes extra contigs flagged by `check_contigs`.
     """
     try:
-        from rpy2.robjects.packages import importr
         from rpy2.rinterface import NULL
         from rpy2.robjects import r
+        from rpy2.robjects.packages import importr
     except:
         raise (
             ImportError(
@@ -396,9 +395,9 @@ def spectral_clones(
         if True removes extra contigs flagged by `check_contigs`.
     """
     try:
-        from rpy2.robjects.packages import importr
         from rpy2.rinterface import NULL
         from rpy2.robjects import r
+        from rpy2.robjects.packages import importr
     except:
         raise (
             ImportError(
@@ -465,8 +464,8 @@ def safe_py2rpy(df: pd.DataFrame) -> "rpy2 object":
     """Convert pandas DataFrame to R object safely."""
     try:
         import rpy2
-        from rpy2.robjects.conversion import localconverter
         from rpy2.robjects import pandas2ri
+        from rpy2.robjects.conversion import localconverter
     except:
         raise (
             ImportError(
@@ -474,15 +473,11 @@ def safe_py2rpy(df: pd.DataFrame) -> "rpy2 object":
             )
         )
     try:
-        with localconverter(
-            rpy2.robjects.default_converter + pandas2ri.converter
-        ):
+        with localconverter(rpy2.robjects.default_converter + pandas2ri.converter):
             return pandas2ri.py2rpy(df)
     except:
         df = df.astype(str)
-        with localconverter(
-            rpy2.robjects.default_converter + pandas2ri.converter
-        ):
+        with localconverter(rpy2.robjects.default_converter + pandas2ri.converter):
             return pandas2ri.py2rpy(df)
 
 
@@ -490,8 +485,8 @@ def safe_rpy2py(r_object) -> pd.DataFrame:
     """Convert R object to pandas DataFrame safely."""
     try:
         import rpy2
-        from rpy2.robjects.conversion import localconverter
         from rpy2.robjects import pandas2ri
+        from rpy2.robjects.conversion import localconverter
     except:
         raise (
             ImportError(

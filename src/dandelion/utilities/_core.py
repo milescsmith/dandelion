@@ -1,33 +1,32 @@
 #!/usr/bin/env python
+import _pickle as cPickle
 import bz2
 import copy
 import gzip
-import h5py
 import os
 import re
 import warnings
+from collections import defaultdict
+from pathlib import Path
+from textwrap import dedent
+from typing import Literal
 
-import _pickle as cPickle
+import h5py
 import networkx as nx
 import numpy as np
 import pandas as pd
-
 from changeo.IO import readGermlines
-from collections import defaultdict
 from pandas.api.types import infer_dtype
-from pathlib import Path
 from scanpy import logging as logg
 from scipy.sparse import csr_matrix
-from textwrap import dedent
 from tqdm import tqdm
-from typing import Literal
 
-from dandelion.utilities._utilities import *
 from dandelion.external.anndata._compat import (
+    Index,
     _normalize_index,
     unpack_index,
-    Index,
 )
+from dandelion.utilities._utilities import *
 
 CHECK_COLS = BOOLEAN_LIKE_COLUMNS + [
     "rev_comp",
@@ -138,7 +137,9 @@ class Dandelion:
     def _gen_repr(self, n_obs, n_contigs) -> str:
         """Report."""
         # inspire by AnnData's function
-        descr = f"Dandelion class object with n_obs = {n_obs} and n_contigs = {n_contigs}"
+        descr = (
+            f"Dandelion class object with n_obs = {n_obs} and n_contigs = {n_contigs}"
+        )
         for attr in ["data", "metadata"]:
             try:
                 keys = getattr(self, attr).keys()
@@ -147,9 +148,9 @@ class Dandelion:
             if len(keys) > 0:
                 descr += f"\n    {attr}: {str(list(keys))[1:-1]}"
         if self.layout is not None:
-            descr += f"\n    layout: {', '.join(['layout for '+ str(len(x)) + ' vertices' for x in (self.layout[0], self.layout[1])])}"
+            descr += f"\n    layout: {', '.join(['layout for ' + str(len(x)) + ' vertices' for x in (self.layout[0], self.layout[1])])}"
         if self.graph is not None:
-            descr += f"\n    graph: {', '.join(['networkx graph of '+ str(len(x)) + ' vertices' for x in (self.graph[0], self.graph[1])])} "
+            descr += f"\n    graph: {', '.join(['networkx graph of ' + str(len(x)) + ' vertices' for x in (self.graph[0], self.graph[1])])} "
         return descr
 
     def __repr__(self) -> str:
@@ -161,17 +162,13 @@ class Dandelion:
         """Returns a sliced object."""
         if isinstance(index, np.ndarray):
             if len(index) == self._metadata.shape[0]:
-                idx, idxtype = self._normalize_indices(
-                    self._metadata.index[index]
-                )
+                idx, idxtype = self._normalize_indices(self._metadata.index[index])
             elif len(index) == self._data.shape[0]:
                 idx, idxtype = self._normalize_indices(self._data.index[index])
         else:
             idx, idxtype = self._normalize_indices(index[index].index)
         if idxtype == "metadata":
-            _data = self._data[
-                self._data.cell_id.isin(self._metadata.iloc[idx].index)
-            ]
+            _data = self._data[self._data.cell_id.isin(self._metadata.iloc[idx].index)]
             _metadata = self._metadata.iloc[idx]
         elif idxtype == "data":
             _metadata = self._metadata[
@@ -180,12 +177,8 @@ class Dandelion:
             _data = self._data.iloc[idx]
         _keep_cells = _metadata.index
         if self.layout is not None:
-            _layout0 = {
-                k: r for k, r in self.layout[0].items() if k in _keep_cells
-            }
-            _layout1 = {
-                k: r for k, r in self.layout[1].items() if k in _keep_cells
-            }
+            _layout0 = {k: r for k, r in self.layout[0].items() if k in _keep_cells}
+            _layout1 = {k: r for k, r in self.layout[1].items() if k in _keep_cells}
             _layout = (_layout0, _layout1)
         else:
             _layout = None
@@ -297,7 +290,7 @@ class Dandelion:
         # fmt: off
         if (
             not isinstance(value, pd.RangeIndex)
-            and not infer_dtype(value) in ("string", "bytes")
+            and infer_dtype(value) not in ("string", "bytes")
         ):
             sample = list(value[: min(len(value), 5)])
             warnings.warn(dedent(
@@ -306,7 +299,7 @@ class Dandelion:
                     {sample}
                     Inferred to be: {infer_dtype(value)}
                 """
-                ), # noqa
+                ),
                 stacklevel=2,
             )
         # fmt: on
@@ -359,9 +352,7 @@ class Dandelion:
             else self._original_cell_ids
         )
         clean_func = (
-            self._clean_sequence_id
-            if column == "sequence_id"
-            else self._clean_cell_id
+            self._clean_sequence_id if column == "sequence_id" else self._clean_cell_id
         )
         cleaned_values = [
             clean_func(x, remove_trailing_hyphen_number)
@@ -389,13 +380,9 @@ class Dandelion:
                 for x in other_original.astype(str)
             ]
             if operation == "prefix":
-                self._data[other_column] = [
-                    value + sep + x for x in cleaned_other
-                ]
+                self._data[other_column] = [value + sep + x for x in cleaned_other]
             elif operation == "suffix":
-                self._data[other_column] = [
-                    x + sep + value for x in cleaned_other
-                ]
+                self._data[other_column] = [x + sep + value for x in cleaned_other]
         self._data = load_data(self._data)
         if self._metadata is not None:
             self.update_metadata(**kwargs)
@@ -586,9 +573,7 @@ class Dandelion:
         # strip alleles from VDJ and constant gene calls
         for col in ["v_call", "v_call_genotyped", "d_call", "j_call", "c_call"]:
             if col in self.data:
-                self._data[col] = self._data[col].str.replace(
-                    r"\*.*", "", regex=True
-                )
+                self._data[col] = self._data[col].str.replace(r"\*.*", "", regex=True)
                 # only keep the main annotation
                 self._data[col] = self._data[col].str.split(",").str[0]
         self.update_metadata(**kwargs)
@@ -640,18 +625,16 @@ class Dandelion:
         if self.querier is None:
             querier = Query(dataq)
             self.querier = querier
-        else:
-            if self.metadata is not None:
-                if reinitialize:
-                    querier = Query(dataq)
-                else:
-                    if any(~self.metadata_names.isin(self.data.cell_id)):
-                        querier = Query(dataq)
-                        self.querier = querier
-                    else:
-                        querier = self.querier
+        elif self.metadata is not None:
+            if reinitialize:
+                querier = Query(dataq)
+            elif any(~self.metadata_names.isin(self.data.cell_id)):
+                querier = Query(dataq)
+                self.querier = querier
             else:
                 querier = self.querier
+        else:
+            querier = self.querier
 
         meta_ = defaultdict(dict)
         for k, v in init_dict.copy().items():
@@ -677,9 +660,7 @@ class Dandelion:
         reqcols1 = [
             "locus_VDJ",
         ]
-        vcall = (
-            "v_call_genotyped" if "v_call_genotyped" in self.data else "v_call"
-        )
+        vcall = "v_call_genotyped" if "v_call_genotyped" in self.data else "v_call"
         reqcols2 = [
             "locus_VJ",
             "productive_VDJ",
@@ -753,24 +734,19 @@ class Dandelion:
 
         for mode in ["B", "abT", "gdT"]:
             tmp_metadata[vcalldict[vcall] + "_" + mode + "_VDJ_main"] = [
-                return_none_call(x)
-                for x in tmp_metadata[vcall + "_" + mode + "_VDJ"]
+                return_none_call(x) for x in tmp_metadata[vcall + "_" + mode + "_VDJ"]
             ]
             tmp_metadata["d_call_" + mode + "_VDJ_main"] = [
-                return_none_call(x)
-                for x in tmp_metadata["d_call_" + mode + "_VDJ"]
+                return_none_call(x) for x in tmp_metadata["d_call_" + mode + "_VDJ"]
             ]
             tmp_metadata["j_call_" + mode + "_VDJ_main"] = [
-                return_none_call(x)
-                for x in tmp_metadata["j_call_" + mode + "_VDJ"]
+                return_none_call(x) for x in tmp_metadata["j_call_" + mode + "_VDJ"]
             ]
             tmp_metadata[vcalldict[vcall] + "_" + mode + "_VJ_main"] = [
-                return_none_call(x)
-                for x in tmp_metadata[vcall + "_" + mode + "_VJ"]
+                return_none_call(x) for x in tmp_metadata[vcall + "_" + mode + "_VJ"]
             ]
             tmp_metadata["j_call_" + mode + "_VJ_main"] = [
-                return_none_call(x)
-                for x in tmp_metadata["j_call_" + mode + "_VJ"]
+                return_none_call(x) for x in tmp_metadata["j_call_" + mode + "_VJ"]
             ]
 
         if "locus_VDJ" in tmp_metadata:
@@ -793,25 +769,19 @@ class Dandelion:
                         break
                 tmpclones.append(i)
             tmpclones = [
-                "|".join(
-                    sorted(list(set(x)), key=cmp_to_key(cmp_str_emptylast))
-                )
+                "|".join(sorted(list(set(x)), key=cmp_to_key(cmp_str_emptylast)))
                 for x in tmpclones
             ]
             tmpclonesdict = dict(zip(tmp_metadata.index, tmpclones))
             tmp_metadata[str(clonekey)] = pd.Series(tmpclonesdict)
-            tmp = (
-                tmp_metadata[str(clonekey)].str.split("|", expand=True).stack()
-            )
+            tmp = tmp_metadata[str(clonekey)].str.split("|", expand=True).stack()
             tmp = tmp.reset_index(drop=False)
             tmp.columns = ["cell_id", "tmp", str(clonekey)]
             clone_size = tmp[str(clonekey)].value_counts()
             if "" in clone_size.index:
                 clone_size = clone_size.drop("", axis=0)
             clonesize_dict = dict(clone_size)
-            size_of_clone = pd.DataFrame.from_dict(
-                clonesize_dict, orient="index"
-            )
+            size_of_clone = pd.DataFrame.from_dict(clonesize_dict, orient="index")
             size_of_clone.reset_index(drop=False, inplace=True)
             size_of_clone.columns = [str(clonekey), "clone_size"]
             size_of_clone[str(clonekey) + "_by_size"] = size_of_clone.index + 1
@@ -824,11 +794,7 @@ class Dandelion:
             size_dict.update({"": "None"})
             tmp_metadata[str(clonekey) + "_by_size"] = [
                 (
-                    "|".join(
-                        sorted(
-                            list({str(size_dict[c_]) for c_ in c.split("|")})
-                        )
-                    )
+                    "|".join(sorted(list({str(size_dict[c_]) for c_ in c.split("|")})))
                     if len(c.split("|")) > 1
                     else str(size_dict[c])
                 )
@@ -872,9 +838,7 @@ class Dandelion:
                                     for z, pp in zip(
                                         [
                                             (
-                                                conversion_dict[
-                                                    y.split(",")[0][:4]
-                                                ]
+                                                conversion_dict[y.split(",")[0][:4]]
                                                 if y.split(",")[0][:4]
                                                 in conversion_dict
                                                 else "None"
@@ -895,8 +859,7 @@ class Dandelion:
                                     for z in [
                                         (
                                             conversion_dict[y.split(",")[0][:4]]
-                                            if y.split(",")[0][:4]
-                                            in conversion_dict
+                                            if y.split(",")[0][:4] in conversion_dict
                                             else "None"
                                         )
                                         for y in k.split("|")
@@ -933,16 +896,12 @@ class Dandelion:
         tmp_metadata["locus_status"] = format_locus(
             tmp_metadata, vcall=vcall, productive_only=report_productive_only
         )
-        tmp_metadata["chain_status"] = format_chain_status(
-            tmp_metadata["locus_status"]
-        )
+        tmp_metadata["chain_status"] = format_chain_status(tmp_metadata["locus_status"])
         tmp_metadata["isotype_status"] = format_isotype2(tmp_metadata)
 
         if "isotype" in tmp_metadata:
             if all(tmp_metadata["isotype"] == "None"):
-                tmp_metadata.drop(
-                    ["isotype", "isotype_status"], axis=1, inplace=True
-                )
+                tmp_metadata.drop(["isotype", "isotype_status"], axis=1, inplace=True)
         for rc in reqcols:
             tmp_metadata[rc] = tmp_metadata[rc].replace("", "None")
         if clonekey in init_dict:
@@ -964,11 +923,7 @@ class Dandelion:
 
         for x in tmpxregstat:
             tmpxregstat[x] = [
-                (
-                    "chimeric"
-                    if re.search("chimeric", y)
-                    else "Multi" if "|" in y else y
-                )
+                ("chimeric" if re.search("chimeric", y) else "Multi" if "|" in y else y)
                 for y in tmpxregstat[x]
             ]
             tmp_metadata[x] = pd.Series(tmpxregstat[x])
@@ -1001,9 +956,7 @@ class Dandelion:
         else:
             vcall = "v_call"
         contig_status = []
-        for v, j, c in zip(
-            self.data[vcall], self.data["j_call"], self.data["c_call"]
-        ):
+        for v, j, c in zip(self.data[vcall], self.data["j_call"], self.data["c_call"]):
             if present(v):
                 if present(j):
                     if present(c):
@@ -1011,11 +964,10 @@ class Dandelion:
                             contig_status.append("chimeric")
                         else:
                             contig_status.append("standard")
+                    elif len(list({v[:3], j[:3]})) > 1:
+                        contig_status.append("chimeric")
                     else:
-                        if len(list({v[:3], j[:3]})) > 1:
-                            contig_status.append("chimeric")
-                        else:
-                            contig_status.append("standard")
+                        contig_status.append("standard")
                 else:
                     contig_status.append("unknown")
             else:
@@ -1329,9 +1281,7 @@ class Dandelion:
                     retrieve_mode="split and sum",
                     **kwargs,
                 )
-                self.update_metadata(
-                    retrieve=mutations, retrieve_mode="sum", **kwargs
-                )
+                self.update_metadata(retrieve=mutations, retrieve_mode="sum", **kwargs)
             if len(vdjlengths) > 0:
                 self.update_metadata(
                     retrieve=vdjlengths,
@@ -1354,9 +1304,7 @@ class Dandelion:
                     retrieve_mode="split and sum",
                     **kwargs,
                 )
-                self.update_metadata(
-                    retrieve=mutations, retrieve_mode="sum", **kwargs
-                )
+                self.update_metadata(retrieve=mutations, retrieve_mode="sum", **kwargs)
         if option == "cdr3 lengths":
             if len(vdjlengths) > 0:
                 self.update_metadata(
@@ -1371,9 +1319,7 @@ class Dandelion:
                     retrieve_mode="split and sum",
                     **kwargs,
                 )
-                self.update_metadata(
-                    retrieve=mutations, retrieve_mode="sum", **kwargs
-                )
+                self.update_metadata(retrieve=mutations, retrieve_mode="sum", **kwargs)
             if len(vdjlengths) > 0:
                 self.update_metadata(
                     retrieve=vdjlengths,
@@ -1416,58 +1362,53 @@ class Dandelion:
             except:
                 raise KeyError(
                     "Environmental variable GERMLINE must be set. Otherwise, "
-                    + "please provide path to folder containing germline IGHV, IGHD, and IGHJ fasta files."
+                    "please provide path to folder containing germline IGHV, IGHD, and IGHJ fasta files."
                 )
             gml = gml / db / org / "vdj"
-        else:
-            if type(germline) is list:
-                if len(germline) < 3:
+        elif type(germline) is list:
+            if len(germline) < 3:
+                raise TypeError(
+                    "Input for germline is incorrect. Please provide path to folder containing germline IGHV, IGHD, "
+                    "and IGHJ fasta files, or individual paths to the germline IGHV, IGHD, and IGHJ fasta "
+                    "files (with .fasta extension) as a list."
+                )
+            else:
+                gml = []
+                for x in germline:
+                    if not x.endswith((".fasta", ".fa")):
+                        raise TypeError(
+                            "Input for germline is incorrect. Please provide path to folder containing germline "
+                            "IGHV, IGHD, and IGHJ fasta files, or individual paths to the germline IGHV, IGHD, and IGHJ fasta "
+                            "files (with .fasta extension) as a list."
+                        )
+                    gml.append(x)
+        elif type(germline) is not list:
+            if os.path.isdir(germline):
+                germline_ = [str(Path(germline, g)) for g in os.listdir(germline)]
+                if len(germline_) < 3:
                     raise TypeError(
-                        "Input for germline is incorrect. Please provide path to folder containing germline IGHV, IGHD, "
-                        + "and IGHJ fasta files, or individual paths to the germline IGHV, IGHD, and IGHJ fasta "
-                        + "files (with .fasta extension) as a list."
+                        "Input for germline is incorrect. Please provide path to folder containing germline IGHV, "
+                        "IGHD, and IGHJ fasta files, or individual paths to the germline IGHV, IGHD, and IGHJ "
+                        "fasta files (with .fasta extension) as a list."
                     )
                 else:
                     gml = []
-                    for x in germline:
+                    for x in germline_:
                         if not x.endswith((".fasta", ".fa")):
                             raise TypeError(
                                 "Input for germline is incorrect. Please provide path to folder containing germline "
-                                + "IGHV, IGHD, and IGHJ fasta files, or individual paths to the germline IGHV, IGHD, and IGHJ fasta "
-                                + "files (with .fasta extension) as a list."
+                                "IGHV, IGHD, and IGHJ fasta files, or individual paths to the germline IGHV, IGHD, "
+                                "and IGHJ fasta files (with .fasta extension) as a list."
                             )
                         gml.append(x)
-            elif type(germline) is not list:
-                if os.path.isdir(germline):
-                    germline_ = [
-                        str(Path(germline, g)) for g in os.listdir(germline)
-                    ]
-                    if len(germline_) < 3:
-                        raise TypeError(
-                            "Input for germline is incorrect. Please provide path to folder containing germline IGHV, "
-                            + "IGHD, and IGHJ fasta files, or individual paths to the germline IGHV, IGHD, and IGHJ "
-                            + "fasta files (with .fasta extension) as a list."
-                        )
-                    else:
-                        gml = []
-                        for x in germline_:
-                            if not x.endswith((".fasta", ".fa")):
-                                raise TypeError(
-                                    "Input for germline is incorrect. Please provide path to folder containing germline "
-                                    + "IGHV, IGHD, and IGHJ fasta files, or individual paths to the germline IGHV, IGHD, "
-                                    + "and IGHJ fasta files (with .fasta extension) as a list."
-                                )
-                            gml.append(x)
-                elif os.path.isfile(germline) and str(germline).endswith(
-                    (".fasta", ".fa")
-                ):
-                    gml = []
-                    gml.append(germline)
-                    warnings.warn(
-                        "Only 1 fasta file provided to updating germline slot. Please check if this is intended.",
-                        RuntimeWarning,
-                        stacklevel=2,
-                    )
+            elif os.path.isfile(germline) and str(germline).endswith((".fasta", ".fa")):
+                gml = []
+                gml.append(germline)
+                warnings.warn(
+                    "Only 1 fasta file provided to updating germline slot. Please check if this is intended.",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
 
         if type(gml) is not list:
             gml = [gml]
@@ -1486,7 +1427,7 @@ class Dandelion:
             else:
                 raise TypeError(
                     "Input for corrected germline fasta is incorrect. Please provide path to file containing "
-                    + "corrected germline fasta sequences."
+                    "corrected germline fasta sequences."
                 )
 
         self.germline.update(germline_ref)
@@ -1597,18 +1538,14 @@ class Dandelion:
         if not all([c in self.data for c in cols]):
             raise ValueError(
                 "Unable to initialize metadata due to missing keys. "
-                "Please ensure the input data contains all the following columns: {}".format(
-                    cols
-                )
+                f"Please ensure the input data contains all the following columns: {cols}"
             )
 
         if "sample_id" in self.data:
             cols = ["sample_id"] + cols
 
         if "v_call_genotyped" in self.data:
-            cols = list(
-                map(lambda x: "v_call_genotyped" if x == "v_call" else x, cols)
-            )
+            cols = list(map(lambda x: "v_call_genotyped" if x == "v_call" else x, cols))
 
         for c in ["sequence_id", "cell_id"]:
             cols.remove(c)
@@ -1637,12 +1574,11 @@ class Dandelion:
             if self.querier is None:
                 querier = Query(self.data)
                 self.querier = querier
+            elif any([r not in self.querier.data for r in retrieve]):
+                querier = Query(self.data)
+                self.querier = querier
             else:
-                if any([r not in self.querier.data for r in retrieve]):
-                    querier = Query(self.data)
-                    self.querier = querier
-                else:
-                    querier = self.querier
+                querier = self.querier
 
             if type(retrieve_mode) is str:
                 retrieve_mode = [retrieve_mode]
@@ -1668,9 +1604,7 @@ class Dandelion:
                     else:
                         retrieve_[k] = querier.retrieve(**v)
                 else:
-                    raise KeyError(
-                        "Cannot retrieve '%s' : Unknown column name." % k
-                    )
+                    raise KeyError("Cannot retrieve '%s' : Unknown column name." % k)
             ret_metadata = pd.concat(retrieve_.values(), axis=1, join="inner")
             ret_metadata.dropna(axis=1, how="all", inplace=True)
             for col in ret_metadata:
@@ -1712,9 +1646,7 @@ class Dandelion:
                     tmp_metadata.drop(dcol, axis=1, inplace=True)
             self.metadata = tmp_metadata.copy()
 
-    def write_pkl(
-        self, filename: str = "dandelion_data.pkl.pbz2", **kwargs
-    ) -> None:
+    def write_pkl(self, filename: str = "dandelion_data.pkl.pbz2", **kwargs) -> None:
         """
         Writes a `Dandelion` class to .pkl format.
 
@@ -1744,9 +1676,7 @@ class Dandelion:
             cPickle.dump(self, f, **kwargs)
             f.close()
 
-    def write_airr(
-        self, filename: str = "dandelion_airr.tsv", **kwargs
-    ) -> None:
+    def write_airr(self, filename: str = "dandelion_airr.tsv", **kwargs) -> None:
         """
         Writes a `Dandelion` class to AIRR formatted .tsv format.
 
@@ -1793,9 +1723,7 @@ class Dandelion:
         """
         save_args = {
             "compression": compression,
-            "compression_opts": (
-                9 if compression_level is None else compression_level
-            ),
+            "compression_opts": (9 if compression_level is None else compression_level),
         }
         if compression is None:
             save_args.pop("compression", None)
@@ -1855,32 +1783,32 @@ class Dandelion:
                     )
                     with h5py.File(filename, "a") as hf:
                         hf.create_dataset(
-                            f"graph/graph_{str(i)}/data",
+                            f"graph/graph_{i!s}/data",
                             data=G_x.data,
                             **save_args,
                         )
                         hf.create_dataset(
-                            f"graph/graph_{str(i)}/indices",
+                            f"graph/graph_{i!s}/indices",
                             data=G_x.indices,
                             **save_args,
                         )
                         hf.create_dataset(
-                            f"graph/graph_{str(i)}/indptr",
+                            f"graph/graph_{i!s}/indptr",
                             data=G_x.indptr,
                             **save_args,
                         )
                         hf.create_dataset(
-                            f"graph/graph_{str(i)}/shape",
+                            f"graph/graph_{i!s}/shape",
                             data=G_x.shape,
                             **save_args,
                         )
                         hf.create_dataset(
-                            f"graph/graph_{str(i)}/column",
+                            f"graph/graph_{i!s}/column",
                             data=G_column_array,
                             **save_args,
                         )
                         hf.create_dataset(
-                            f"graph/graph_{str(i)}/index",
+                            f"graph/graph_{i!s}/index",
                             data=G_index_array,
                             **save_args,
                         )
@@ -1888,9 +1816,7 @@ class Dandelion:
             if self.layout is not None:
                 for i, l in enumerate(self.layout):
                     with h5py.File(filename, "a") as hf:
-                        layout_group = hf.create_group(
-                            "layout/layout_" + str(i)
-                        )
+                        layout_group = hf.create_group("layout/layout_" + str(i))
                         # Iterate through the dictionary and create datasets in the "layout" group
                         for key, value in l.items():
                             layout_group.create_dataset(
@@ -2095,100 +2021,60 @@ class Query:
                 if len(vdj) > 0:
                     cols.update(
                         {
-                            query
-                            + "_VDJ": "|".join(
-                                str(x)
-                                for x in list(dict.fromkeys(vdj))
-                                if present(x)
+                            query + "_VDJ": "|".join(
+                                str(x) for x in list(dict.fromkeys(vdj)) if present(x)
                             )
                         }
                     )
                 if len(vj) > 0:
                     cols.update(
                         {
-                            query
-                            + "_VJ": "|".join(
-                                str(x)
-                                for x in list(dict.fromkeys(vj))
-                                if present(x)
+                            query + "_VJ": "|".join(
+                                str(x) for x in list(dict.fromkeys(vj)) if present(x)
                             )
                         }
                     )
             elif retrieve_mode == "split and merge":
                 if len(vdj) > 0:
                     cols.update(
-                        {
-                            query
-                            + "_VDJ": "|".join(
-                                str(x) for x in vdj if present(x)
-                            )
-                        }
+                        {query + "_VDJ": "|".join(str(x) for x in vdj if present(x))}
                     )
                 if len(vj) > 0:
                     cols.update(
-                        {
-                            query
-                            + "_VJ": "|".join(str(x) for x in vj if present(x))
-                        }
+                        {query + "_VJ": "|".join(str(x) for x in vj if present(x))}
                     )
             elif retrieve_mode == "merge and unique only":
                 cols.update(
-                    {
-                        query: "|".join(
-                            str(x) for x in set(vdj + vj) if present(x)
-                        )
-                    }
+                    {query: "|".join(str(x) for x in set(vdj + vj) if present(x))}
                 )
             elif retrieve_mode == "split and sum":
                 if len(vdj) > 0:
                     cols.update(
-                        {
-                            query
-                            + "_VDJ": np.sum(
-                                [float(x) for x in vdj if present(x)]
-                            )
-                        }
+                        {query + "_VDJ": np.sum([float(x) for x in vdj if present(x)])}
                     )
                 else:
                     cols.update({query + "_VDJ": np.nan})
                 if len(vj) > 0:
                     cols.update(
-                        {
-                            query
-                            + "_VJ": np.sum(
-                                [float(x) for x in vj if present(x)]
-                            )
-                        }
+                        {query + "_VJ": np.sum([float(x) for x in vj if present(x)])}
                     )
                 else:
                     cols.update({query + "_VJ": np.nan})
             elif retrieve_mode == "split and average":
                 if len(vdj) > 0:
                     cols.update(
-                        {
-                            query
-                            + "_VDJ": np.mean(
-                                [float(x) for x in vdj if present(x)]
-                            )
-                        }
+                        {query + "_VDJ": np.mean([float(x) for x in vdj if present(x)])}
                     )
                 else:
                     cols.update({query + "_VDJ": np.nan})
                 if len(vj) > 0:
                     cols.update(
-                        {
-                            query
-                            + "_VJ": np.mean(
-                                [float(x) for x in vj if present(x)]
-                            )
-                        }
+                        {query + "_VJ": np.mean([float(x) for x in vj if present(x)])}
                     )
                 else:
                     cols.update({query + "_VJ": np.nan})
             elif retrieve_mode == "merge":
-                cols.update(
-                    {query: "|".join(x for x in (vdj + vj) if present(x))}
-                )
+                cols.update({query: "|".join(x for x in (vdj + vj) if present(x))})
             elif retrieve_mode == "split":
                 if len(vdj) > 0:
                     for i in range(1, len(vdj) + 1):
@@ -2197,9 +2083,7 @@ class Query:
                     for i in range(1, len(vj) + 1):
                         cols.update({query + "_VJ_" + str(i): vj[i - 1]})
             elif retrieve_mode == "sum":
-                cols.update(
-                    {query: np.sum([float(x) for x in vdj + vj if present(x)])}
-                )
+                cols.update({query: np.sum([float(x) for x in vdj + vj if present(x)])})
                 if not present(cols[query]):
                     cols.update({query: np.nan})
             elif retrieve_mode == "average":
@@ -2308,22 +2192,16 @@ class Query:
                 if len(b_vdj) > 0:
                     cols.update(
                         {
-                            query
-                            + "_B_VDJ": "|".join(
-                                str(x)
-                                for x in list(dict.fromkeys(b_vdj))
-                                if present(x)
+                            query + "_B_VDJ": "|".join(
+                                str(x) for x in list(dict.fromkeys(b_vdj)) if present(x)
                             )
                         }
                     )
                 if len(b_vj) > 0:
                     cols.update(
                         {
-                            query
-                            + "_B_VJ": "|".join(
-                                str(x)
-                                for x in list(dict.fromkeys(b_vj))
-                                if present(x)
+                            query + "_B_VJ": "|".join(
+                                str(x) for x in list(dict.fromkeys(b_vj)) if present(x)
                             )
                         }
                     )
@@ -2331,8 +2209,7 @@ class Query:
                 if len(abt_vdj) > 0:
                     cols.update(
                         {
-                            query
-                            + "_abT_VDJ": "|".join(
+                            query + "_abT_VDJ": "|".join(
                                 str(x)
                                 for x in list(dict.fromkeys(abt_vdj))
                                 if present(x)
@@ -2342,8 +2219,7 @@ class Query:
                 if len(abt_vj) > 0:
                     cols.update(
                         {
-                            query
-                            + "_abT_VJ": "|".join(
+                            query + "_abT_VJ": "|".join(
                                 str(x)
                                 for x in list(dict.fromkeys(abt_vj))
                                 if present(x)
@@ -2354,8 +2230,7 @@ class Query:
                 if len(gdt_vdj) > 0:
                     cols.update(
                         {
-                            query
-                            + "_gdT_VDJ": "|".join(
+                            query + "_gdT_VDJ": "|".join(
                                 str(x)
                                 for x in list(dict.fromkeys(gdt_vdj))
                                 if present(x)
@@ -2365,8 +2240,7 @@ class Query:
                 if len(gdt_vj) > 0:
                     cols.update(
                         {
-                            query
-                            + "_gdT_VJ": "|".join(
+                            query + "_gdT_VJ": "|".join(
                                 str(x)
                                 for x in list(dict.fromkeys(gdt_vj))
                                 if present(x)
@@ -2377,27 +2251,20 @@ class Query:
                 if len(b_vdj) > 0:
                     cols.update(
                         {
-                            query
-                            + "_B_VDJ": "|".join(
+                            query + "_B_VDJ": "|".join(
                                 str(x) for x in b_vdj if present(x)
                             )
                         }
                     )
                 if len(b_vj) > 0:
                     cols.update(
-                        {
-                            query
-                            + "_B_VJ": "|".join(
-                                str(x) for x in b_vj if present(x)
-                            )
-                        }
+                        {query + "_B_VJ": "|".join(str(x) for x in b_vj if present(x))}
                     )
 
                 if len(abt_vdj) > 0:
                     cols.update(
                         {
-                            query
-                            + "_abT_VDJ": "|".join(
+                            query + "_abT_VDJ": "|".join(
                                 str(x) for x in abt_vdj if present(x)
                             )
                         }
@@ -2405,8 +2272,7 @@ class Query:
                 if len(abt_vj) > 0:
                     cols.update(
                         {
-                            query
-                            + "_abT_VJ": "|".join(
+                            query + "_abT_VJ": "|".join(
                                 str(x) for x in abt_vj if present(x)
                             )
                         }
@@ -2415,8 +2281,7 @@ class Query:
                 if len(gdt_vdj) > 0:
                     cols.update(
                         {
-                            query
-                            + "_gdT_VDJ": "|".join(
+                            query + "_gdT_VDJ": "|".join(
                                 str(x) for x in gdt_vdj if present(x)
                             )
                         }
@@ -2424,8 +2289,7 @@ class Query:
                 if len(gdt_vj) > 0:
                     cols.update(
                         {
-                            query
-                            + "_gdT_VJ": "|".join(
+                            query + "_gdT_VJ": "|".join(
                                 str(x) for x in gdt_vj if present(x)
                             )
                         }
@@ -2437,12 +2301,7 @@ class Query:
                         query: "|".join(
                             str(x)
                             for x in set(
-                                b_vdj
-                                + abt_vdj
-                                + gdt_vdj
-                                + b_vj
-                                + abt_vj
-                                + gdt_vj
+                                b_vdj + abt_vdj + gdt_vdj + b_vj + abt_vj + gdt_vj
                             )
                             if present(x)
                         )
@@ -2452,8 +2311,7 @@ class Query:
                 if len(b_vdj) > 0:
                     cols.update(
                         {
-                            query
-                            + "_B_VDJ": np.sum(
+                            query + "_B_VDJ": np.sum(
                                 [float(x) for x in b_vdj if present(x)]
                             )
                         }
@@ -2463,8 +2321,7 @@ class Query:
                 if len(b_vj) > 0:
                     cols.update(
                         {
-                            query
-                            + "_B_VJ": np.sum(
+                            query + "_B_VJ": np.sum(
                                 [float(x) for x in b_vj if present(x)]
                             )
                         }
@@ -2475,8 +2332,7 @@ class Query:
                 if len(abt_vdj) > 0:
                     cols.update(
                         {
-                            query
-                            + "_abT_VDJ": np.sum(
+                            query + "_abT_VDJ": np.sum(
                                 [float(x) for x in abt_vdj if present(x)]
                             )
                         }
@@ -2486,8 +2342,7 @@ class Query:
                 if len(abt_vj) > 0:
                     cols.update(
                         {
-                            query
-                            + "_abT_VJ": np.sum(
+                            query + "_abT_VJ": np.sum(
                                 [float(x) for x in abt_vj if present(x)]
                             )
                         }
@@ -2498,8 +2353,7 @@ class Query:
                 if len(gdt_vdj) > 0:
                     cols.update(
                         {
-                            query
-                            + "_gdT_VDJ": np.sum(
+                            query + "_gdT_VDJ": np.sum(
                                 [float(x) for x in gdt_vdj if present(x)]
                             )
                         }
@@ -2509,8 +2363,7 @@ class Query:
                 if len(gdt_vj) > 0:
                     cols.update(
                         {
-                            query
-                            + "_gdT_VJ": np.sum(
+                            query + "_gdT_VJ": np.sum(
                                 [float(x) for x in gdt_vj if present(x)]
                             )
                         }
@@ -2521,8 +2374,7 @@ class Query:
                 if len(b_vdj) > 0:
                     cols.update(
                         {
-                            query
-                            + "_B_VDJ": np.mean(
+                            query + "_B_VDJ": np.mean(
                                 [float(x) for x in b_vdj if present(x)]
                             )
                         }
@@ -2532,8 +2384,7 @@ class Query:
                 if len(b_vj) > 0:
                     cols.update(
                         {
-                            query
-                            + "_B_VJ": np.mean(
+                            query + "_B_VJ": np.mean(
                                 [float(x) for x in b_vj if present(x)]
                             )
                         }
@@ -2544,8 +2395,7 @@ class Query:
                 if len(abt_vdj) > 0:
                     cols.update(
                         {
-                            query
-                            + "_abT_VDJ": np.mean(
+                            query + "_abT_VDJ": np.mean(
                                 [float(x) for x in abt_vdj if present(x)]
                             )
                         }
@@ -2555,8 +2405,7 @@ class Query:
                 if len(abt_vj) > 0:
                     cols.update(
                         {
-                            query
-                            + "_abT_VJ": np.mean(
+                            query + "_abT_VJ": np.mean(
                                 [float(x) for x in abt_vj if present(x)]
                             )
                         }
@@ -2567,8 +2416,7 @@ class Query:
                 if len(gdt_vdj) > 0:
                     cols.update(
                         {
-                            query
-                            + "_gdT_VDJ": np.mean(
+                            query + "_gdT_VDJ": np.mean(
                                 [float(x) for x in gdt_vdj if present(x)]
                             )
                         }
@@ -2578,8 +2426,7 @@ class Query:
                 if len(gdt_vj) > 0:
                     cols.update(
                         {
-                            query
-                            + "_gdT_VJ": np.mean(
+                            query + "_gdT_VJ": np.mean(
                                 [float(x) for x in gdt_vj if present(x)]
                             )
                         }
@@ -2592,12 +2439,7 @@ class Query:
                         query: "|".join(
                             x
                             for x in (
-                                b_vdj
-                                + abt_vdj
-                                + gdt_vdj
-                                + b_vj
-                                + abt_vj
-                                + gdt_vj
+                                b_vdj + abt_vdj + gdt_vdj + b_vj + abt_vj + gdt_vj
                             )
                             if present(x)
                         )
@@ -2612,24 +2454,16 @@ class Query:
                         cols.update({query + "_B_VJ_" + str(i): b_vj[i - 1]})
                 if len(abt_vdj) > 0:
                     for i in range(1, len(abt_vdj) + 1):
-                        cols.update(
-                            {query + "_abT_VDJ_" + str(i): abt_vdj[i - 1]}
-                        )
+                        cols.update({query + "_abT_VDJ_" + str(i): abt_vdj[i - 1]})
                 if len(abt_vj) > 0:
                     for i in range(1, len(abt_vj) + 1):
-                        cols.update(
-                            {query + "_abT_VJ_" + str(i): abt_vj[i - 1]}
-                        )
+                        cols.update({query + "_abT_VJ_" + str(i): abt_vj[i - 1]})
                 if len(gdt_vdj) > 0:
                     for i in range(1, len(gdt_vdj) + 1):
-                        cols.update(
-                            {query + "_gdT_VDJ_" + str(i): gdt_vdj[i - 1]}
-                        )
+                        cols.update({query + "_gdT_VDJ_" + str(i): gdt_vdj[i - 1]})
                 if len(gdt_vj) > 0:
                     for i in range(1, len(gdt_vj) + 1):
-                        cols.update(
-                            {query + "_gdT_VJ_" + str(i): gdt_vj[i - 1]}
-                        )
+                        cols.update({query + "_gdT_VJ_" + str(i): gdt_vj[i - 1]})
             elif retrieve_mode == "sum":
                 cols.update(
                     {
@@ -2699,9 +2533,7 @@ def _normalize_indices(
         index = index.values
     if isinstance(index, tuple):
         if len(index) > 2:
-            raise ValueError(
-                "Dandelion can only be sliced in data or metadata rows."
-            )
+            raise ValueError("Dandelion can only be sliced in data or metadata rows.")
         # deal with pd.Series
         # TODO: The series should probably be aligned first
         if isinstance(index[1], pd.Series):
@@ -2720,7 +2552,7 @@ def _normalize_indices(
 
 def return_none_call(call: str) -> str:
     """Return None if not present."""
-    return call.split("|")[0] if not call in ["None", ""] else "None"
+    return call.split("|")[0] if call not in ["None", ""] else "None"
 
 
 def write_h5ddl_legacy(
@@ -2760,13 +2592,10 @@ def write_h5ddl_legacy(
                 ).any(axis=1)
             else:
                 weird = (
-                    metadata[[col]].map(type)
-                    != metadata[[col]].iloc[0].apply(type)
+                    metadata[[col]].map(type) != metadata[[col]].iloc[0].apply(type)
                 ).any(axis=1)
             if len(metadata[weird]) > 0:
-                metadata[col] = metadata[col].where(
-                    pd.notnull(metadata[col]), ""
-                )
+                metadata[col] = metadata[col].where(pd.notnull(metadata[col]), "")
         metadata.to_hdf(
             filename,
             "metadata",
@@ -2856,9 +2685,7 @@ def concat(
     """
     arrays = list(arrays)
 
-    arrays_ = [
-        x.data.copy() if isinstance(x, Dandelion) else x.copy() for x in arrays
-    ]
+    arrays_ = [x.data.copy() if isinstance(x, Dandelion) else x.copy() for x in arrays]
 
     if (suffixes is not None) and (prefixes is not None):
         raise ValueError("Please provide only prefixes or suffixes, not both.")
@@ -2890,9 +2717,7 @@ def concat(
         except ValueError:
             for i in range(0, len(con_metas)):
                 if (suffixes is None) and (prefixes is None):
-                    con_metas[i].index = [
-                        j + sep + str(i) for j in con_metas[i].index
-                    ]
+                    con_metas[i].index = [j + sep + str(i) for j in con_metas[i].index]
                 elif suffixes is not None:
                     con_metas[i].index = [
                         j + sep + str(suffixes[i]) for j in con_metas[i].index
