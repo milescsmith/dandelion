@@ -8,13 +8,15 @@ import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
-import nxviz as nxv
+
+# import nxviz as nxv
 import pandas as pd
 import seaborn as sns
 from anndata import AnnData
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
-from nxviz import annotate
+
+# from nxviz import annotate
 from plotnine import (
     aes,
     geom_line,
@@ -88,7 +90,7 @@ def clone_rarefaction(
         rarefaction plot.
     """
     if isinstance(vdj_data, AnnData):
-        metadata = vdj_data.obs.copy()
+        metadata: pd.DataFrame = vdj_data.obs.copy()
     elif isinstance(vdj_data, Dandelion):
         metadata = vdj_data.metadata.copy()
     if clone_key is None:
@@ -96,13 +98,13 @@ def clone_rarefaction(
     else:
         clonekey = clone_key
 
-    groups = list(set(metadata[color]))
+    groups = metadata[color].unique().tolist()
     if "contig_QC_pass" in metadata:
         metadata = metadata[metadata["contig_QC_pass"].isin(TRUES)]
     elif "chain_status" in metadata:
         metadata = metadata[metadata["chain_status"].isin(chain_status_include)]
 
-    if type(metadata[clonekey]) == "category":
+    if isinstance(metadata[clonekey], pd.CategoricalDtype):
         metadata[clonekey] = metadata[clonekey].cat.remove_unused_categories()
     res = {}
     for g in groups:
@@ -832,18 +834,15 @@ def clone_overlap(
     node_labels: bool = True,
     return_graph: bool = False,
     save: str | None = None,
-    legend_kwargs: dict = {
-        "ncol": 2,
-        "bbox_to_anchor": (1, 0.5),
-        "frameon": False,
-        "loc": "center left",
-    },
+    legend_kwargs: dict | None = None,
     node_label_size: int = 10,
     as_heatmap: bool = False,
     return_heatmap_data: bool = False,
     scale_edge_lambda: Callable | None = None,
     **kwargs,
-) -> nxv.CircosPlot:
+):
+# commenting out because nxviz is a slow import and I'd like to only pull it in *when* it is used
+# ) -> nxv.CircosPlot:
     """
     A plot function to visualise clonal overlap as a circos-style plot.
 
@@ -898,6 +897,8 @@ def clone_overlap(
         if input is not `AnnData`.
     """
 
+    if legend_kwargs is None:
+        legend_kwargs = {"ncol": 2, "bbox_to_anchor": (1, 0.5), "frameon": False, "loc": "center left"}
     if clone_key is None:
         clone_ = "clone_id"
     else:
@@ -1046,6 +1047,7 @@ def clone_overlap(
     else:
         # remove self loops
         G.remove_edges_from(nx.selfloop_edges(G))
+        import nxviz as nxv
         ax = nxv.circos(
             G,
             group_by=colorby,
@@ -1054,13 +1056,13 @@ def clone_overlap(
             node_palette=colorby_dict,
         )  # group_by
         if node_labels:
-            annotate.circos_group(
+            nxv.annotate.circos_group(
                 G,
                 group_by=colorby,
                 midpoint=False,
                 fontdict={"size": node_label_size},
             )
-        annotate.node_colormapping(
+        nxv.annotate.node_colormapping(
             G,
             color_by=colorby,
             palette=colorby_dict,

@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import os
 import re
+import shutil
 import tempfile
 import warnings
 from operator import countOf
@@ -33,7 +34,21 @@ from plotnine import (
 )
 from scanpy import logging as logg
 from tqdm import tqdm
+from tqdm.contrib import tenumerate
 
+from dandelion.constants import (
+    DEFAULT_PREFIX,
+    FALSES,
+    HEAVYLONG,
+    LIGHTSHORT,
+    NO_DS,
+    TRUES,
+    ChainType,
+    DBSource,
+    OrgSpecies,
+    ReannotateFlavour,
+    MouseStrain
+)
 from dandelion.external.immcantation.changeo import (
     assigngenes_igblast,
     creategermlines,
@@ -43,13 +58,39 @@ from dandelion.external.immcantation.changeo import (
 )
 from dandelion.external.immcantation.tigger import tigger_genotype
 from dandelion.tools._tools import transfer
-from dandelion.utilities._core import *
-from dandelion.utilities._io import *
-from dandelion.utilities._utilities import *
+from dandelion.utilities._core import Dandelion
+from dandelion.utilities._io import (
+    change_file_location,
+    fasta_iterator,
+    make_all,
+    move_to_tmp,
+    read_10x_vdj,
+    rename_dandelion,
+)
+from dandelion.utilities._utilities import (
+    Tree,
+    all_missing,
+    check_data,
+    check_filepath,
+    deprecated,
+    flatten,
+    lib_type,
+    load_data,
+    mask_dj,
+    not_same_call,
+    present,
+    sanitize_data,
+    set_blast_env,
+    set_igblast_env,
+    write_airr,
+    write_blastn,
+    write_fasta,
+)
 
 
 def format_fasta(
-    fasta: Path | str,
+    fasta: Path,
+    anno: Path | None = None,
     prefix: str | None = None,
     suffix: str | None = None,
     sep: str | None = None,
@@ -65,6 +106,8 @@ def format_fasta(
     ----------
     fasta : Path | str
         path to fasta file.
+    anno : Path | None
+        path to the contig annotation file. If not provided, will attempt to guess
     prefix : str | None, optional
         prefix to append to the headers/contig ids.
     suffix : str | None, optional
@@ -96,134 +139,92 @@ def format_fasta(
     )
 
     if file_path is None:
-        raise FileNotFoundError(
+        msg = (
             "Path to fasta file is unknown. Please "
             "specify path to fasta file or folder containing fasta file. "
             "Starting folder should only contain 1 fasta file."
         )
+        raise FileNotFoundError(msg)
     # before continuing, check if the file is not empty
-    if os.stat(file_path).st_size == 0:
-        raise ValueError(
-            f"{file_path!s} is empty. Please check the file and try again or remove if necessary."
-        )
-    fh = open(file_path)
-    seqs = {}
-    if sep is None:
-        separator = "_"
-    else:
-        separator = str(sep)
-    for header, sequence in fasta_iterator(fh):
-        if prefix is None and suffix is None:
-            seqs[header] = sequence
-        elif prefix is not None:
-            if suffix is not None:
-                if remove_trailing_hyphen_number:
-                    newheader = (
-                        str(prefix)
-                        + separator
-                        + str(header).split("_contig")[0].split("-")[0]
-                        + separator
-                        + str(suffix)
-                        + "_contig"
-                        + str(header).split("_contig")[1]
-                    )
-                else:
-                    newheader = (
-                        str(prefix)
-                        + separator
-                        + str(header).split("_contig")[0]
-                        + separator
-                        + str(suffix)
-                        + "_contig"
-                        + str(header).split("_contig")[1]
-                    )
-            elif remove_trailing_hyphen_number:
-                newheader = (
-                    str(prefix)
-                    + separator
-                    + str(header).split("_contig")[0].split("-")[0]
-                    + "_contig"
-                    + str(header).split("_contig")[1]
-                )
-            else:
-                newheader = str(prefix) + separator + str(header)
-            seqs[newheader] = sequence
+    if file_path.stat().st_size == 0:
+        msg = f"{file_path!s} is empty. Please check the file and try again or remove if necessary."
+        raise ValueError(msg)
+
+    with file_path.open() as fh:
+        seqs = {}
+        if sep is None:
+            separator = "_"
         else:
-            if suffix is not None:
-                if remove_trailing_hyphen_number:
-                    newheader = (
-                        str(header).split("_contig")[0].split("-")[0]
-                        + separator
-                        + str(suffix)
-                        + "_contig"
-                        + str(header).split("_contig")[1]
-                    )
+            separator = str(sep)
+        for header, sequence in fasta_iterator(fh):
+            if prefix is None and suffix is None:
+                seqs[header] = sequence
+            elif prefix is not None:
+                if suffix is not None:
+                    if remove_trailing_hyphen_number:
+                        newheader = f"{prefix!s}{separator}{str(header).split('_contig')[0].split('-')[0]}{separator}{suffix!s}_contig{str(header).split('_contig')[1]}"
+                    else:
+                        newheader = f"{prefix!s}{separator}{str(header).split('_contig')[0]}{separator}{suffix!s}_contig{str(header).split('_contig')[1]}"
+                elif remove_trailing_hyphen_number:
+                    newheader = f"{prefix!s}{separator}{str(header).split('_contig')[0].split('-')[0]}_contig{str(header).split('_contig')[1]}"
                 else:
-                    newheader = (
-                        str(header).split("_contig")[0]
-                        + separator
-                        + str(suffix)
-                        + "_contig"
-                        + str(header).split("_contig")[1]
-                    )
+                    newheader = f"{prefix!s}{separator}{header!s}"
+                seqs[newheader] = sequence
             else:
-                newheader = str(header)
-            seqs[newheader] = sequence
-    fh.close()
+                if suffix is not None:
+                    if remove_trailing_hyphen_number:
+                        newheader = f"{str(header).split('_contig')[0].split('-')[0]}{separator}{suffix!s}_contig{str(header).split('_contig')[1]}"
+                    else:
+                        newheader = f"{str(header).split('_contig')[0]}{separator}{suffix!s}_contig{str(header).split('_contig')[1]}"
+                else:
+                    newheader = str(header)
+                seqs[newheader] = sequence
+
     base_dir = file_path.parent if file_path.is_file() else Path.cwd()
     out_dir = base_dir / "dandelion" if out_dir is None else Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+
     # format the barcode and contig_id in the corresponding annotation file too
-    anno = check_filepath(
-        fasta,
-        filename_prefix=filename_pre,
-        ends_with="_annotations.csv",
-        within_dandelion=False,
-    )
-    data = pd.read_csv(anno, dtype="object")
+    # MCS: why are we guessing where the annotation file is? just take it as an argument.
+
+    if (anno is None) or not anno.exists():
+        anno = check_filepath(
+            fasta,
+            filename_prefix=filename_pre,
+            ends_with="_annotations.csv",
+            within_dandelion=False,
+        )
+    if anno is None:
+        msg = "The annotation file could not be found."
+        raise FileNotFoundError(msg)
+    elif not anno.exists():
+        msg = f"The annotation file was not found at {anno}"
+        raise FileNotFoundError(msg)
+    else:
+        data = pd.read_csv(anno, dtype="object")
     if prefix is not None:
         if suffix is not None:
             if remove_trailing_hyphen_number:
                 data["contig_id"] = [
-                    str(prefix)
-                    + separator
-                    + str(c).split("_contig")[0].split("-")[0]
-                    + separator
-                    + str(suffix)
-                    + "_contig"
-                    + str(c).split("_contig")[1]
+                    f"{prefix!s}{separator}{str(c).split('_contig')[0].split('-')[0]}{separator}{suffix!s}_contig{str(c).split('_contig')[1]}"
                     for c in data["contig_id"]
                 ]
                 data["barcode"] = [
-                    str(prefix)
-                    + separator
-                    + str(b).split("-")[0]
-                    + separator
-                    + str(suffix)
+                    f"{prefix!s}{separator}{str(b).split('-')[0]}{separator}{suffix!s}"
                     for b in data["barcode"]
                 ]
             else:
                 data["contig_id"] = [
-                    str(prefix)
-                    + separator
-                    + str(c).split("_contig")[0]
-                    + separator
-                    + str(suffix)
-                    + "_contig"
-                    + str(c).split("_contig")[1]
+                    f'{prefix!s}{separator}{str(c).split("_contig")[0]}{separator}{suffix!s}_contig{str(c).split("_contig")[1]}'
                     for c in data["contig_id"]
                 ]
                 data["barcode"] = [
-                    str(prefix) + separator + str(b) + separator + str(suffix)
+                    f"{prefix!s}{separator}{b!s}{separator}{suffix!s}"
                     for b in data["barcode"]
                 ]
         elif remove_trailing_hyphen_number:
             data["contig_id"] = [
-                str(prefix)
-                + separator
-                + str(c).split("_contig")[0].split("-")[0]
-                + "_contig"
-                + str(c).split("_contig")[1]
+                f'{prefix!s}{separator}{str(c).split("_contig")[0].split("-")[0]}_contig{str(c).split("_contig")[1]}'
                 for c in data["contig_id"]
             ]
             data["barcode"] = [
@@ -239,31 +240,24 @@ def format_fasta(
     elif suffix is not None:
         if remove_trailing_hyphen_number:
             data["contig_id"] = [
-                str(c).split("_contig")[0].split("-")[0]
-                + separator
-                + str(suffix)
-                + "_contig"
-                + str(c).split("_contig")[1]
+                f'{str(c).split("_contig")[0].split("-")[0]}{separator}{suffix!s}_contig{str(c).split("_contig")[1]}'
                 for c in data["contig_id"]
             ]
             data["barcode"] = [
-                str(b).split("-")[0] + separator + str(suffix) for b in data["barcode"]
+                f'{str(b).split("-")[0]}{separator}{suffix!s}' for b in data["barcode"]
             ]
         else:
             data["contig_id"] = [
-                str(c).split("_contig")[0]
-                + separator
-                + str(suffix)
-                + "_contig"
-                + str(c).split("_contig")[1]
+                f'{str(c).split("_contig")[0]}{separator}{suffix!s}_contig{str(c).split("_contig")[1]}'
                 for c in data["contig_id"]
             ]
             data["barcode"] = [
-                str(b) + separator + str(suffix) for b in data["barcode"]
+                f"{b!s}{separator}{suffix!s}" for b in data["barcode"]
             ]
     else:
         data["contig_id"] = [str(c) for c in data["contig_id"]]
         data["barcode"] = [str(b) for b in data["barcode"]]
+    # MCS: why are we checking this *again*?
     anno = check_filepath(
         fasta,
         filename_prefix=filename_pre,
@@ -272,34 +266,34 @@ def format_fasta(
     )
     out_anno = out_dir / (file_path.stem + "_annotations.csv")
     out_fasta = out_dir / file_path.name
-    fh1 = open(out_fasta, "w")
-    fh1.close()
+
     if high_confidence_filtering:
         hiconf_contigs = [
-            x for x, y in zip(data["contig_id"], data["high_confidence"]) if y in TRUES
+            x for x, y in zip(data["contig_id"], data["high_confidence"], strict=True) if y in TRUES
         ]
         seqs = {hiconf: seqs[hiconf] for hiconf in hiconf_contigs}
         data = data[data["contig_id"].isin(hiconf_contigs)]
-    write_fasta(fasta_dict=seqs, out_fasta=out_fasta)
+    out = [f">{key}\n{value}\n" for key, value in seqs.items()]
+    _ = out_fasta.write_text("".join(out))
     data.to_csv(out_anno, index=False)
 
 
 def format_fastas(
-    fastas: list[Path | str] | Path | str,
-    prefix: list[str] | None = None,
+    fastas: list[Path] | Path,
+    prefix: list[str] | str | None = None,
     suffix: list[str] | None = None,
     sep: str | None = None,
     remove_trailing_hyphen_number: bool = True,
     high_confidence_filtering: bool = False,
     out_dir: Path | str | None = None,
-    filename_prefix: list[str] | str | None = None,
+    filename_prefix: list[str | None] | str | None = None,
 ):
     """
     Add prefix to the headers/contig ids in input fasta and annotation file.
 
     Parameters
     ----------
-    fastas : list[Path | str]
+    fastas : list[Path]
         list of paths to fasta files.
     prefix : list[str] | None, optional
         list of prefixes to append to headers/contig ids in each fasta file.
@@ -321,19 +315,20 @@ def format_fastas(
     """
     fastas, filename_prefix = check_data(fastas, filename_prefix)
     if prefix is not None:
-        if not isinstance(prefix, list):
+        if isinstance(prefix, np.str_):
             prefix = [prefix]
-        prefix_dict = dict(zip(fastas, prefix))
+        prefix_dict = dict(zip(fastas, prefix, strict=True))
     if suffix is not None:
-        if not isinstance(suffix, list):
+        if isinstance(suffix, str):
             suffix = [suffix]
-        suffix_dict = dict(zip(fastas, suffix))
+        suffix_dict = dict(zip(fastas, suffix, strict=True))
 
-    for i in tqdm(
-        range(0, len(fastas)),
+    for i, _ in tenumerate(
+        fastas,
         desc="Formatting fasta(s) ",
         bar_format="{l_bar}{bar:10}{r_bar}{bar:-10b}",
     ):
+        _fprefix = filename_prefix if filename_prefix is None else filename_prefix[i]
         if prefix is None and suffix is None:
             format_fasta(
                 fastas[i],
@@ -343,7 +338,7 @@ def format_fastas(
                 remove_trailing_hyphen_number=remove_trailing_hyphen_number,
                 high_confidence_filtering=high_confidence_filtering,
                 out_dir=out_dir,
-                filename_prefix=filename_prefix[i],
+                filename_prefix=_fprefix,
             )
         elif prefix is not None:
             if suffix is not None:
@@ -355,7 +350,7 @@ def format_fastas(
                     remove_trailing_hyphen_number=remove_trailing_hyphen_number,
                     high_confidence_filtering=high_confidence_filtering,
                     out_dir=out_dir,
-                    filename_prefix=filename_prefix[i],
+                    filename_prefix=_fprefix,
                 )
             else:
                 format_fasta(
@@ -366,7 +361,7 @@ def format_fastas(
                     remove_trailing_hyphen_number=remove_trailing_hyphen_number,
                     high_confidence_filtering=high_confidence_filtering,
                     out_dir=out_dir,
-                    filename_prefix=filename_prefix[i],
+                    filename_prefix=_fprefix,
                 )
         elif suffix is not None:
             format_fasta(
@@ -377,7 +372,7 @@ def format_fastas(
                 remove_trailing_hyphen_number=remove_trailing_hyphen_number,
                 high_confidence_filtering=high_confidence_filtering,
                 out_dir=out_dir,
-                filename_prefix=filename_prefix[i],
+                filename_prefix=_fprefix,
             )
         else:
             format_fasta(
@@ -388,12 +383,12 @@ def format_fastas(
                 remove_trailing_hyphen_number=remove_trailing_hyphen_number,
                 high_confidence_filtering=high_confidence_filtering,
                 out_dir=out_dir,
-                filename_prefix=filename_prefix[i],
+                filename_prefix=_fprefix,
             )
 
 
 def assign_isotype(
-    fasta: Path | str,
+    fasta: Path,
     org: Literal["human", "mouse"] = "human",
     evalue: float = 1e-4,
     correct_c_call: bool = True,
@@ -402,9 +397,9 @@ def assign_isotype(
     save_plot: bool = False,
     show_plot: bool = True,
     figsize: tuple[float, float] = (4, 4),
-    blastdb: Path | str | None = None,
+    blastdb: Path | None = None,
     filename_prefix: str | None = None,
-    additional_args: list[str] = [],
+    additional_args: list[str] | None= None,
 ):
     """
     Annotate contigs with constant region call using blastn.
@@ -436,7 +431,7 @@ def assign_isotype(
         whether or not to show plot.
     figsize : tuple[float, float], optional
         size of figure.
-    blastdb : Path | str | None, optional
+    blastdb : Path | None, optional
         path to blast database. Defaults to `$BLASTDB` environmental variable.
     filename_prefix : str | None, optional
         prefix of file name preceding '_contig'. `None` defaults to 'all'.
@@ -447,6 +442,8 @@ def assign_isotype(
     FileNotFoundError
         if path to fasta file is unknown.
     """
+    if additional_args is None:
+        additional_args = []
     aligner = Align.PairwiseAligner()
 
     def gene_correction(df: pd.DataFrame, i: str, dictionary: dict[str, str]):
@@ -492,16 +489,12 @@ def assign_isotype(
                         "IGHA2": "GCATCCCCGACCAGCCCCAAGGTCTTCCCGCTGAGCCTCGACAGCACCCCCCAAGATGGGAACGTGGTCGTCGCATGC",
                     },
                     "IGLC7": {
-                        "IGLC": "GTCAGCCCAAGGCTGCCCCCTCGGTCACTCTGTTCCCGCCCTCCTCTGAGGAGCTTCAAGCCAACAAGGCCACACTGGTG"
-                        "TGTCTCATAA",
-                        "IGLC7": "GTCAGCCCAAGGCTGCCCCCTCGGTCACTCTGTTCCCACCCTCCTCTGAGGAGCTTCAAGCCAACAAGGCCACACTGGT"
-                        "GTGTCTCGTAA",
+                        "IGLC": "GTCAGCCCAAGGCTGCCCCCTCGGTCACTCTGTTCCCGCCCTCCTCTGAGGAGCTTCAAGCCAACAAGGCCACACTGGTGTGTCTCATAA",
+                        "IGLC7": "GTCAGCCCAAGGCTGCCCCCTCGGTCACTCTGTTCCCACCCTCCTCTGAGGAGCTTCAAGCCAACAAGGCCACACTGGTGTGTCTCGTAA",
                     },
                     "IGLC3": {
-                        "IGLC": "GTCAGCCCAAGGCTGCCCCCTCGGTCACTCTGTTCCCGCCCTCCTCTGAGGAGCTTCAAGCCAACAAGGCCACACTGGTG"
-                        "TGTCTCATAA",
-                        "IGLC3": "GTCAGCCCAAGGCTGCCCCCTCGGTCACTCTGTTCCCACCCTCCTCTGAGGAGCTTCAAGCCAACAAGGCCACACTGGT"
-                        "GTGTCTCATAA",
+                        "IGLC": "GTCAGCCCAAGGCTGCCCCCTCGGTCACTCTGTTCCCGCCCTCCTCTGAGGAGCTTCAAGCCAACAAGGCCACACTGGTGTGTCTCATAA",
+                        "IGLC3": "GTCAGCCCAAGGCTGCCCCCTCGGTCACTCTGTTCCCACCCTCCTCTGAGGAGCTTCAAGCCAACAAGGCCACACTGGTGTGTCTCATAA",
                     },
                     "IGLC6": {
                         "IGLC": "TCGGTCACTCTGTTCCCGCCCTCCTCTGAGGAGCTTCAAGCCAACAAGGCCACACTGGTGTGTCTCA",
@@ -526,17 +519,20 @@ def assign_isotype(
                         gene_correction(dat, i, genes)
         return dat
 
-    filePath = check_filepath(
+    file_path = check_filepath(
         fasta, filename_prefix=filename_prefix, ends_with=".fasta"
     )
-    if filePath is None:
-        raise FileNotFoundError(
+    if file_path is None:
+        msg = (
             "Path to fasta file is unknown. Please specify path to "
             "fasta file or folder containing fasta file."
         )
+        raise FileNotFoundError(
+            msg
+        )
 
     blast_out = run_blastn(
-        fasta=filePath,
+        fasta=file_path,
         database=blastdb,
         org=org,
         loci="ig",
@@ -627,12 +623,18 @@ def assign_isotype(
         res = pd.concat([res_10x_sum, res_blast_sum])
 
     res = res.reset_index(drop=True)
-    res["c_call"] = res["c_call"].fillna(value="None")
-    res["c_call"] = [re.sub("[*][0-9][0-9]", "", c) for c in res["c_call"]]
-    res["c_call"] = res["c_call"].astype("category")
-    res["c_call"] = res["c_call"].cat.reorder_categories(
-        sorted(list(set(res["c_call"])), reverse=True)
-    )
+    res["c_call"] = pd.Series(data = [
+            re.sub(
+                pattern="[*][0-9][0-9]",
+                repl="",
+                string=c
+            ) 
+            for c 
+            in res["c_call"].fillna(value="None")
+        ]
+        ).astype("category").cat.reorder_categories(
+            sorted(set(res["c_call"]), reverse=True)
+        )
 
     logg.info("Finishing up \n")
     dat["c_call_10x"] = pd.Series(res_10x["c_call"])
@@ -685,7 +687,7 @@ def assign_isotype(
                 + theme(legend_title=element_blank())
             )
         if save_plot:
-            _file3 = filePath.parent / "assign_isotype.pdf"
+            _file3 = file_path.parent / "assign_isotype.pdf"
             save_as_pdf_pages([p], filename=_file3, verbose=False)
         if show_plot:  # pragma: no cover
             p.show()
@@ -697,7 +699,7 @@ def assign_isotype(
 
 
 def assign_isotypes(
-    fastas: list[Path | str] | Path | str,
+    fastas: list[Path] | Path,
     org: Literal["human", "mouse"] = "human",
     evalue: float = 1e4,
     correct_c_call: bool = True,
@@ -706,9 +708,9 @@ def assign_isotypes(
     save_plot: bool = False,
     show_plot: bool = True,
     figsize: tuple[float, float] = (4, 4),
-    blastdb: Path | str | None = None,
+    blastdb: Path | None = None,
     filename_prefix: list[str] | str | None = None,
-    additional_args: list[str] = [],
+    additional_args: list[str] | None = None,
 ):
     """
     Annotate contigs with constant region call using blastn.
@@ -738,18 +740,20 @@ def assign_isotypes(
         whether or not to show plots.
     figsize : tuple[float, float], optional
         size of figure.
-    blastdb : Path | str | None, optional
+    blastdb : Path | None, optional
         path to blast database. Defaults to `$BLASTDB` environmental variable.
     filename_prefix : list[str] | str | None, optional
         list of prefixes of file names preceding '_contig'. `None` defaults to 'all'.
     additional_args : list[str], optional
         additional arguments to pass to `blastn`.
     """
+    if additional_args is None:
+        additional_args = []
     fastas, filename_prefix = check_data(fastas, filename_prefix)
 
     logg.info("Assign isotypes \n")
 
-    for i in range(0, len(fastas)):
+    for i, _ in enumerate(fastas):
         assign_isotype(
             fastas[i],
             org=org,
@@ -761,20 +765,20 @@ def assign_isotypes(
             show_plot=show_plot,
             figsize=figsize,
             blastdb=blastdb,
-            filename_prefix=filename_prefix[i],
+            filename_prefix=filename_prefix if filename_prefix is None else filename_prefix[i],
             additional_args=additional_args,
         )
 
 
 def reannotate_genes(
-    data: list[Path | str] | Path | str,
-    igblast_db: str | None = None,
+    data: list[Path] | Path,
+    igblast_db: Path | None = None,
     germline: str | None = None,
-    org: Literal["human", "mouse"] = "human",
-    loci: Literal["ig", "tr"] = "ig",
+    org: OrgSpecies = OrgSpecies.human,
+    loci: ChainType | str = ChainType.ig,
     extended: bool = True,
-    filename_prefix: list[str] | str | None = None,
-    flavour: Literal["strict", "original"] = "strict",
+    filename_prefix: list[str | None] | str | None = None,
+    flavour: ReannotateFlavour | str = ReannotateFlavour.strict,
     min_j_match: int = 7,
     min_d_match: int = 9,
     v_evalue: float = 1e-4,
@@ -783,41 +787,12 @@ def reannotate_genes(
     reassign_dj: bool = True,
     overwrite: bool = True,
     dust: str | None = "no",
-    db: Literal["imgt", "ogrdb"] = "imgt",
+    db: DBSource = DBSource.imgt,
     strain: (
-        Literal[
-            "c57bl6",
-            "balbc",
-            "129S1_SvImJ",
-            "AKR_J",
-            "A_J",
-            "BALB_c_ByJ",
-            "BALB_c",
-            "C3H_HeJ",
-            "C57BL_6J",
-            "C57BL_6",
-            "CAST_EiJ",
-            "CBA_J",
-            "DBA_1J",
-            "DBA_2J",
-            "LEWES_EiJ",
-            "MRL_MpJ",
-            "MSM_MsJ",
-            "NOD_ShiLtJ",
-            "NOR_LtJ",
-            "NZB_BlNJ",
-            "PWD_PhJ",
-            "SJL_J",
-        ]
+        MouseStrain,
         | None
     ) = None,
-    additional_args: dict[str, list[str]] = {
-        "assigngenes": [],
-        "makedb": [],
-        "igblastn": [],
-        "blastn_j": [],
-        "blastn_d": [],
-    },
+    additional_args: dict[str, list[str]] | None = None,
 ):
     """
     Reannotate cellranger fasta files with igblastn and parses to airr format.
@@ -828,7 +803,7 @@ def reannotate_genes(
         list of fasta file locations, or folder name containing fasta files.
         if provided as a single string, it will first be converted to a list;
         this allows for the function to be run on single/multiple samples.
-    igblast_db : str | None, optional
+    igblast_db : Path | None, optional
         path to igblast database folder. Defaults to `IGDATA` environmental
         variable.
     germline : str | None, optional
@@ -901,32 +876,40 @@ def reannotate_genes(
     FileNotFoundError
         if path to fasta file is unknown.
     """
+    if additional_args is None:
+        additional_args = {"assigngenes": [], "makedb": [], "igblastn": [], "blastn_j": [], "blastn_d": []}
     data, filename_prefix = check_data(data, filename_prefix)
-    filePath = None
-    for i in tqdm(
-        range(0, len(data)),
+    file_path = None
+    for i, _ in tenumerate(
+        data,
         desc="Assigning genes ",
         bar_format="{l_bar}{bar:10}{r_bar}{bar:-10b}",
     ):
-        filePath = check_filepath(
-            data[i], filename_prefix=filename_prefix[i], ends_with=".fasta"
+        file_path = check_filepath(
+            data[i], filename_prefix=filename_prefix if filename_prefix is None else filename_prefix[i], ends_with=".fasta"
         )
-        if filePath is None:
-            if filename_prefix[i] is not None:
-                raise FileNotFoundError(
+        if file_path is None:
+            if filename_prefix is not None and filename_prefix[i] is not None:
+                msg = (
                     f"Path to fasta file with filename prefix `{filename_prefix[i]}_contig` is unknown. "
                     "Please specify path to fasta file or folder containing fasta file."
                 )
-            else:
                 raise FileNotFoundError(
+                    msg
+                )
+            else:
+                msg = (
                     "Path to fasta file is unknown. "
                     "Please specify path to fasta file or folder containing fasta file."
                 )
+                raise FileNotFoundError(
+                    msg
+                )
 
-        logg.info(f"Processing {filePath!s} \n")
+        logg.info(f"Processing {file_path!s} \n")
         if flavour == "original":
             assigngenes_igblast(
-                filePath,
+                file_path,
                 igblast_db=igblast_db,
                 org=org,
                 loci=loci,
@@ -934,7 +917,7 @@ def reannotate_genes(
             )
         elif flavour == "strict":
             run_igblastn(
-                filePath,
+                file_path,
                 igblast_db=igblast_db,
                 org=org,
                 loci=loci,
@@ -946,7 +929,7 @@ def reannotate_genes(
             )
         db = "imgt" if flavour == "original" else db
         makedb_igblast(
-            filePath,
+            file_path,
             org=org,
             germline=germline,
             extended=extended,
@@ -959,7 +942,7 @@ def reannotate_genes(
         if flavour == "strict":
             if reassign_dj:
                 assign_DJ(
-                    fasta=filePath,
+                    fasta=file_path,
                     org=org,
                     loci=loci,
                     call="j",
@@ -974,7 +957,7 @@ def reannotate_genes(
                     additional_args=additional_args["blastn_j"],
                 )
                 assign_DJ(
-                    fasta=filePath,
+                    fasta=file_path,
                     org=org,
                     loci=loci,
                     call="d",
@@ -989,7 +972,7 @@ def reannotate_genes(
                     additional_args=additional_args["blastn_d"],
                 )
                 ensure_columns_transferred(
-                    fasta=filePath,
+                    fasta=file_path,
                     filename_prefix=filename_prefix,
                 )
 
@@ -1030,9 +1013,12 @@ def return_pass_fail_filepaths(
         fasta, filename_prefix=filename_prefix, ends_with=".fasta"
     )
     if file_path is None:
-        raise FileNotFoundError(
+        msg = (
             "Path to fasta file is unknown. Please specify "
             "path to fasta file or folder containing fasta file."
+        )
+        raise FileNotFoundError(
+            msg
         )
     # read the original object
     pass_path = file_path.parent / "tmp" / (file_path.stem + "_igblast_db-pass.tsv")
@@ -1041,7 +1027,7 @@ def return_pass_fail_filepaths(
 
 
 def ensure_columns_transferred(
-    fasta: str,
+    fasta: Path,
     filename_prefix: str | None = None,
 ):
     """Ensure the additional columns are successfully populated.
@@ -1053,7 +1039,7 @@ def ensure_columns_transferred(
     filename_prefix : str | None, optional
         prefix of file name preceding '_contig'. `None` defaults to 'all'.
     """
-    filePath, passfile, failfile = return_pass_fail_filepaths(
+    _, passfile, failfile = return_pass_fail_filepaths(
         fasta, filename_prefix=filename_prefix
     )
     addcols = [
@@ -1160,10 +1146,7 @@ def reassign_alleles(
     figsize: tuple[float, float] = (4, 3),
     sample_id_dictionary: dict[str, str] | None = None,
     filename_prefix: list[str] | str | None = None,
-    additional_args: dict[str, list[str]] = {
-        "tigger": [],
-        "creategermlines": [],
-    },
+    additional_args: dict[str, list[str]] | None = None,
 ):
     """
     Correct allele calls based on a personalized genotype using tigger.
@@ -1217,6 +1200,8 @@ def reassign_alleles(
     FileNotFoundError
         if reannotated file is not found.
     """
+    if additional_args is None:
+        additional_args = {"tigger": [], "creategermlines": []}
     fileformat = "blast"
     data, filename_prefix = check_data(data, filename_prefix)
 
@@ -1254,44 +1239,47 @@ def reassign_alleles(
 
     filepathlist_heavy = []
     filepathlist_light = []
-    filePath = None
-    sampleNames_dict = {}
-    filePath_dict = {}
-    for i in tqdm(
-        range(0, len(data)),
+    file_path = None
+    sample_names_dict = {}
+    file_path_dict = {}
+    for i, _ in tenumerate(
+        data,
         desc="Processing data file(s) ",
         bar_format="{l_bar}{bar:10}{r_bar}{bar:-10b}",
     ):
-        filePath = check_filepath(
+        file_path = check_filepath(
             data[i],
-            filename_prefix=filename_prefix[i],
+            filename_prefix=filename_prefix if filename_prefix is None else filename_prefix[i],
             ends_with=informat_dict[fileformat],
             sub_dir="tmp",
         )
-        if filePath is None:
-            raise FileNotFoundError(
+        if file_path is None:
+            msg = (
                 f"Path to .tsv file for {data[i]} is unknown. "
                 "Please specify path to reannotated .tsv file or folder "
                 "containing reannotated .tsv file."
             )
+            raise FileNotFoundError(
+                msg
+            )
 
-        filePath_heavy = filePath.parent / (filePath.stem + "_heavy_parse-select.tsv")
-        filePath_light = filePath.parent / (filePath.stem + "_light_parse-select.tsv")
+        file_path_heavy = file_path.parent / (file_path.stem + "_heavy_parse-select.tsv")
+        file_path_light = file_path.parent / (file_path.stem + "_light_parse-select.tsv")
 
         if sample_id_dictionary is not None:
-            sampleNames_dict[filePath] = sample_id_dictionary[data[i]]
+            sample_names_dict[file_path] = sample_id_dictionary[data[i]]
         else:
-            sampleNames_dict[filePath] = str(data[i])
+            sample_names_dict[file_path] = str(data[i])
 
-        filePath_dict[str(data[i])] = filePath
+        file_path_dict[str(data[i])] = file_path
 
         # splitting up to heavy chain and light chain files
-        parsedb_heavy(filePath)
-        parsedb_light(filePath)
+        parsedb_heavy(file_path)
+        parsedb_light(file_path)
 
         # add to counter
-        filepathlist_heavy.append(filePath_heavy)
-        filepathlist_light.append(filePath_light)
+        filepathlist_heavy.append(file_path_heavy)
+        filepathlist_light.append(file_path_light)
 
     # make output directory
     out_dir = Path(str(combined_folder))
@@ -1301,16 +1289,10 @@ def reassign_alleles(
         logg.info("Concatenating objects")
         try:
             cmd1 = " ".join(
-                ['awk "FNR==1 && NR!=1 { while (/^sequence_id/) getline; } 1 {print}"']
-                + [f for f in filepathlist_heavy]
-                + [">"]
-                + [str(out_dir / (out_dir.stem + "_heavy" + informat_dict[fileformat]))]
+                ['awk "FNR==1 && NR!=1 { while (/^sequence_id/) getline; } 1 {print}"', *list(filepathlist_heavy), ">", str(out_dir / (out_dir.stem + "_heavy" + informat_dict[fileformat]))]
             )
             cmd2 = " ".join(
-                ['awk "FNR==1 && NR!=1 { while (/^sequence_id/) getline; } 1 {print}"']
-                + [f for f in filepathlist_light]
-                + [">"]
-                + [str(out_dir / (out_dir.stem + "_light" + informat_dict[fileformat]))]
+                ['awk "FNR==1 && NR!=1 { while (/^sequence_id/) getline; } 1 {print}"', *list(filepathlist_light), ">", str(out_dir / (out_dir.stem + "_light" + informat_dict[fileformat]))]
             )
             os.system(cmd1)
             os.system(cmd2)
@@ -1341,7 +1323,6 @@ def reassign_alleles(
             ) as out_file:
                 for filenum, filename in enumerate(filepathlist_light):
                     with open(filename) as in_file:
-                        skip_next_line = False
                         for line_num, line in enumerate(in_file):
                             if (line_num == 0) and (filenum > 0):
                                 continue
@@ -1435,7 +1416,6 @@ def reassign_alleles(
                 logg.info(
                     "     Insufficient contigs for running tigger-genotype. Defaulting to original heavy chain v_calls."
                 )
-                tigger_failed = ""
     else:
         try:
             logg.info("      Running tigger-genotype without novel allele discovery.")
@@ -1476,7 +1456,7 @@ def reassign_alleles(
             logg.info(
                 "      Insufficient contigs for running tigger-genotype. Defaulting to original heavy chain v_calls."
             )
-            tigger_failed = ""
+            
 
     if "tigger_failed" in locals():
         creategermlines(
@@ -1516,7 +1496,7 @@ def reassign_alleles(
                             / (out_dir.stem + "_heavy" + germpass_dict[fileformat])
                         )
                     }
-                )
+                ), stacklevel=2
             )
             return
         logg.info(
@@ -1534,11 +1514,11 @@ def reassign_alleles(
     light = load_data(out_dir / (out_dir.stem + "_light" + germpass_dict[fileformat]))
     light["v_call_genotyped"] = light["v_call"]
 
-    sampledict = {}
+    
     heavy["sample_id"], light["sample_id"] = None, None
-    for file in sampleNames_dict.keys():
+    for file, _ in sample_names_dict.items():
         dat_f = load_data(file)
-        dat_f["sample_id"] = sampleNames_dict[file]
+        dat_f["sample_id"] = sample_names_dict[file]
         heavy.update(dat_f[["sample_id"]])
         light.update(dat_f[["sample_id"]])
 
@@ -1597,23 +1577,23 @@ def reassign_alleles(
                 ambiguous_table.reset_index(inplace=True, drop=True)
                 not_in_genotype_table.reset_index(inplace=True, drop=True)
                 # melting the dataframe
-                ambiguous_table_before = ambiguous_table.drop("after", axis=1)
+                ambiguous_table_before: pd.DataFrame = ambiguous_table.drop("after", axis=1)
                 ambiguous_table_before.rename(columns={"before": "var"}, inplace=True)
                 ambiguous_table_before["var_group"] = "before"
-                ambiguous_table_after = ambiguous_table.drop("before", axis=1)
+                ambiguous_table_after: pd.DataFrame = ambiguous_table.drop("before", axis=1)
                 ambiguous_table_after.rename(columns={"after": "var"}, inplace=True)
                 ambiguous_table_after["var_group"] = "after"
                 ambiguous_table = pd.concat(
                     [ambiguous_table_before, ambiguous_table_after]
                 )
-                not_in_genotype_table_before = not_in_genotype_table.drop(
+                not_in_genotype_table_before: pd.DataFrame = not_in_genotype_table.drop(
                     "after", axis=1
                 )
                 not_in_genotype_table_before.rename(
                     columns={"before": "var"}, inplace=True
                 )
                 not_in_genotype_table_before["var_group"] = "before"
-                not_in_genotype_table_after = not_in_genotype_table.drop(
+                not_in_genotype_table_after: pd.DataFrame = not_in_genotype_table.drop(
                     "before", axis=1
                 )
                 not_in_genotype_table_after.rename(
@@ -1679,7 +1659,7 @@ def reassign_alleles(
             out_file = dat_[dat_["sample_id"] == sample_id_dictionary[s]]
         else:
             out_file = dat_[dat_["sample_id"] == s]
-        outfilepath = filePath_dict[s]
+        outfilepath = file_path_dict[s]
         write_airr(out_file, outfilepath.parent / (outfilepath.stem + "_genotyped.tsv"))
 
 
@@ -1785,7 +1765,7 @@ def create_germlines(
         else:
             creategermlines(
                 airr_file=tmpfile,
-                germline=germline,
+                germline=[germline],
                 org=org,
                 genotyped_fasta=genotyped_fasta,
                 db=db,
@@ -1841,7 +1821,7 @@ def filter_contigs(
     save: Path | str | None = None,
     verbose: bool = True,
     **kwargs,
-) -> tuple[Dandelion, AnnData]:  # pragma: no cover
+) -> tuple[Dandelion, AnnData] | Dandelion:  # pragma: no cover
     """
     Filter doublets and poor quality cells and corresponding contigs based on provided V(D)J `DataFrame` and `AnnData`.
 
@@ -1934,16 +1914,16 @@ def filter_contigs(
 
     if not simple:
         if productive_only:
-            dat = dat_[dat_["productive"].isin(TRUES)].copy()
+            dat: pd.DataFrame = dat_[dat_["productive"].isin(TRUES)].copy()
         else:
             dat = dat_.copy()
     else:
         dat = dat_.copy()
 
     if acceptable is not None:
-        dat = dat[dat.locus.isin(acceptable)].copy()
+        dat: pd.DataFrame = dat[dat.locus.isin(acceptable)].copy()
 
-    barcode = list(set(dat["cell_id"]))
+    barcode: list[str] = dat["cell_id"].unique().tolist()
 
     if adata is not None:
         adata_provided = True
@@ -1979,11 +1959,11 @@ def filter_contigs(
     else:
         tofilter = FilterContigsLite(dat, verbose)
 
-    poor_qual = tofilter.poor_qual.copy()
-    h_doublet = tofilter.h_doublet.copy()
-    l_doublet = tofilter.l_doublet.copy()
-    drop_contig = tofilter.drop_contig.copy()
-    umi_adjustment = tofilter.umi_adjustment.copy()
+    poor_qual: list[str] = tofilter.poor_qual.copy()
+    h_doublet: list[str] = tofilter.h_doublet.copy()
+    l_doublet: list[str] = tofilter.l_doublet.copy()
+    drop_contig: list[str] = tofilter.drop_contig.copy()
+    umi_adjustment: dict[str, int] = tofilter.umi_adjustment.copy()
 
     if len(umi_adjustment) > 0:
         dat.update({"umi_count": umi_adjustment})
@@ -2028,9 +2008,9 @@ def filter_contigs(
         filter_ids = list(set(filter_ids))
 
         if filter_missing:
-            dat = dat[dat["cell_id"].isin(adata_.obs_names)].copy()
+            dat: pd.DataFrame = dat[dat["cell_id"].isin(adata_.obs_names)].copy()
 
-        _dat = dat[~(dat["cell_id"].isin(filter_ids))].copy()
+        _dat: pd.DataFrame = dat[~(dat["cell_id"].isin(filter_ids))].copy()
         _dat = _dat[~(_dat["sequence_id"].isin(drop_contig))].copy()
 
         # final check
@@ -2040,8 +2020,9 @@ def filter_contigs(
         _dat = _dat[~(_dat["cell_id"].isin(filter_ids2))].copy()
 
         if _dat.shape[0] == 0:
+            msg = "No contigs passed filtering. Are you sure that the cell barcodes are matching?"
             raise IndexError(
-                "No contigs passed filtering. Are you sure that the cell barcodes are matching?"
+                msg
             )
 
         if os.path.isfile(str(data)):
@@ -2054,8 +2035,9 @@ def filter_contigs(
             if str(save).endswith(".tsv"):
                 write_airr(_dat, save)
             else:
+                msg = f"{save!s} not suitable. Please provide a file name that ends with .tsv"
                 raise ValueError(
-                    f"{save!s} not suitable. Please provide a file name that ends with .tsv"
+                    msg
                 )
     else:
         _dat = dat.copy()
@@ -2068,7 +2050,7 @@ def filter_contigs(
     if filter_contig:
         failed = list(set(barcode1) ^ set(barcode2))
 
-    logg.info("Initializing Dandelion object")
+    _ = logg.info("Initializing Dandelion object")
     out_dat = Dandelion(data=_dat, **kwargs)
     if isinstance(data, Dandelion):
         out_dat.germline = data.germline
@@ -2090,14 +2072,14 @@ def filter_contigs(
         else:
             out_adata = adata_.copy()
         transfer(out_adata, out_dat, overwrite=True)
-        logg.info(
+        _ = logg.info(
             " finished",
             time=start,
             deep=("Returning Dandelion and AnnData objects: \n"),
         )
         return (out_dat, out_adata)
     else:
-        logg.info(
+        _ = logg.info(
             " finished",
             time=start,
             deep=("Returning Dandelion object: \n"),
@@ -2168,13 +2150,13 @@ class FilterContigs:  # pragma: no cover
         self.drop_contig = []
         self.umi_adjustment = {}
         if "v_call_genotyped" in data.columns:
-            v_dict = dict(zip(data["sequence_id"], data["v_call_genotyped"]))
+            v_dict = dict(zip(data["sequence_id"], data["v_call_genotyped"], strict=True))
         else:
-            v_dict = dict(zip(data["sequence_id"], data["v_call"]))
-        d_dict = dict(zip(data["sequence_id"], data["d_call"]))
-        j_dict = dict(zip(data["sequence_id"], data["j_call"]))
-        c_dict = dict(zip(data["sequence_id"], data["c_call"]))
-        l_dict = dict(zip(data["sequence_id"], data["locus"]))
+            v_dict = dict(zip(data["sequence_id"], data["v_call"], strict=True))
+        d_dict = dict(zip(data["sequence_id"], data["d_call"], strict=True))
+        j_dict = dict(zip(data["sequence_id"], data["j_call"], strict=True))
+        c_dict = dict(zip(data["sequence_id"], data["c_call"], strict=True))
+        l_dict = dict(zip(data["sequence_id"], data["locus"], strict=True))
         for contig, row in tqdm(
             data.iterrows(),
             desc="Preparing data",
@@ -2310,9 +2292,9 @@ class FilterContigs:  # pragma: no cover
                                         for x in h_umi_p[:keep_index_h]
                                         + h_umi_p[keep_index_h:]
                                     ]
-                                    umi_test_dict = dict(zip(other_umi_idx, umi_test_))
-                                    for otherindex in umi_test_dict:
-                                        if umi_test_dict[otherindex]:
+                                    umi_test_dict = dict(zip(other_umi_idx, umi_test_, strict=True))
+                                    for otherindex, othervalue in umi_test_dict.items():
+                                        if othervalue:
                                             if keep_highest_umi:
                                                 self.drop_contig.append(h_p[otherindex])
                                     # refresh
@@ -2388,7 +2370,7 @@ class FilterContigs:  # pragma: no cover
                                         for x in h_umi_p[:keep_index_h]
                                         + h_umi_p[keep_index_h:]
                                     ]
-                                    umi_test_dict = dict(zip(other_umi_idx, umi_test_))
+                                    umi_test_dict = dict(zip(other_umi_idx, umi_test_, strict=True))
                                     for otherindex in umi_test_dict:
                                         if umi_test_dict[otherindex]:
                                             if keep_highest_umi:
@@ -2417,7 +2399,7 @@ class FilterContigs:  # pragma: no cover
                                     for x in h_umi_p[:keep_index_h]
                                     + h_umi_p[keep_index_h:]
                                 ]
-                                umi_test_dict = dict(zip(other_umi_idx, umi_test_))
+                                umi_test_dict = dict(zip(other_umi_idx, umi_test_, strict=True))
                                 for otherindex in umi_test_dict:
                                     if umi_test_dict[otherindex]:
                                         if keep_highest_umi:
@@ -2438,8 +2420,8 @@ class FilterContigs:  # pragma: no cover
                         if isinstance(self.Cell[cell]["VDJ"]["NP"][x], dict)
                     ],
                 )
-                h_np = list(data2["sequence_id"])
-                h_umi_np = [int(x) for x in pd.to_numeric(data2["umi_count"])]
+                h_np = data2["sequence_id"].to_list()
+                h_umi_np = data2["umi_count"].astype(int).to_list()
                 if len(h_np) > 1:
                     highest_umi_h = max(h_umi_np)
                     highest_umi_idx = [
@@ -2455,7 +2437,7 @@ class FilterContigs:  # pragma: no cover
                             highest_umi_h / x >= umi_foldchange_cutoff
                             for x in h_umi_np[:keep_index_h] + h_umi_np[keep_index_h:]
                         ]
-                        umi_test_dict = dict(zip(other_umi_idx, umi_test_))
+                        umi_test_dict = dict(zip(other_umi_idx, umi_test_, strict=True))
                         for otherindex in umi_test_dict:
                             if umi_test_dict[otherindex]:
                                 self.drop_contig.append(h_np[otherindex])
@@ -2522,9 +2504,9 @@ class FilterContigs:  # pragma: no cover
                                 highest_umi_l / x >= umi_foldchange_cutoff
                                 for x in l_umi_p[:keep_index_l] + l_umi_p[keep_index_l:]
                             ]
-                            umi_test_dict_l = dict(zip(other_umi_idx_l, umi_test_l))
-                            for otherindex in umi_test_dict_l:
-                                if umi_test_dict_l[otherindex]:
+                            umi_test_dict_l = dict(zip(other_umi_idx_l, umi_test_l, strict=True))
+                            for otherindex, othervalue in umi_test_dict_l.items():
+                                if othervalue:
                                     if keep_highest_umi:
                                         self.drop_contig.append(l_p[otherindex])
                                         # refresh
@@ -2560,7 +2542,7 @@ class FilterContigs:  # pragma: no cover
                         for x in l_umi_np[:keep_index_l] + l_umi_np[keep_index_l:]
                     ]
                     if len(highest_umi_l_idx) == 1:
-                        umi_test_dict_l = dict(zip(other_umi_idx_l, umi_test_l))
+                        umi_test_dict_l = dict(zip(other_umi_idx_l, umi_test_l, strict=True))
                         for otherindex in umi_test_dict_l:
                             if umi_test_dict_l[otherindex]:
                                 if keep_highest_umi:
@@ -2911,12 +2893,12 @@ class FilterContigsLite:  # pragma: no cover
         self.drop_contig = []
         self.umi_adjustment = {}
         if "v_call_genotyped" in data.columns:
-            v_dict = dict(zip(data["sequence_id"], data["v_call_genotyped"]))
+            v_dict = dict(zip(data["sequence_id"], data["v_call_genotyped"], strict=True))
         else:
-            v_dict = dict(zip(data["sequence_id"], data["v_call"]))
-        d_dict = dict(zip(data["sequence_id"], data["d_call"]))
-        j_dict = dict(zip(data["sequence_id"], data["j_call"]))
-        c_dict = dict(zip(data["sequence_id"], data["c_call"]))
+            v_dict = dict(zip(data["sequence_id"], data["v_call"], strict=True))
+        d_dict = dict(zip(data["sequence_id"], data["d_call"], strict=True))
+        j_dict = dict(zip(data["sequence_id"], data["j_call"], strict=True))
+        c_dict = dict(zip(data["sequence_id"], data["c_call"], strict=True))
         for contig, row in tqdm(
             data.iterrows(),
             desc="Preparing data",
@@ -3214,7 +3196,7 @@ class FilterContigsLite:  # pragma: no cover
 
 
 def run_igblastn(
-    fasta: Path | str,
+    fasta: Path,
     igblast_db: Path | str | None = None,
     org: Literal["human", "mouse"] = "human",
     loci: Literal["ig", "tr"] = "ig",
@@ -3499,8 +3481,8 @@ def assign_DJ(
 
 
 def run_blastn(
-    fasta: Path | str,
-    database: str | None,
+    fasta: Path,
+    database: Path | None,
     org: Literal["human", "mouse"] = "human",
     loci: Literal["ig", "tr"] = "ig",
     call: Literal["v", "d", "j", "c"] = "c",
@@ -3621,12 +3603,12 @@ def run_blastn(
         str(fasta),
     ]
     if dust is not None:
-        cmd = cmd + ["-dust", str(dust)]
+        cmd = [*cmd, "-dust", str(dust)]
     if word_size is not None:
-        cmd = cmd + ["-word_size", str(word_size)]
+        cmd = [*cmd, "-word_size", str(word_size)]
     cmd = cmd + additional_args
     blast_out = fasta.parent / "tmp" / (fasta.stem + "_" + call + "_blast.tsv")
-    logg.info("Running command: %s\n" % (" ".join(cmd)))
+    logg.info("Running command: {}\n".format(" ".join(cmd)))
     with open(blast_out, "w") as out:
         run(cmd, check=False, stdout=out, env=env)
     try:
@@ -3902,14 +3884,14 @@ def transfer_assignment(
                     str(int(n)) if n >= 0 else ""
                     for n in [
                         ((d - v) - 1 if pd.notnull(v) and pd.notnull(d) else np.nan)
-                        for v, d in zip(vend, dstart)
+                        for v, d in zip(vend, dstart, strict=True)
                     ]
                 ]
                 np2 = [
                     str(int(n)) if n >= 0 else ""
                     for n in [
                         ((j - d) - 1 if pd.notnull(j) and pd.notnull(d) else np.nan)
-                        for d, j in zip(dend, jstart)
+                        for d, j in zip(dend, jstart, strict=True)
                     ]
                 ]
 
@@ -4102,14 +4084,14 @@ def transfer_assignment(
                     str(int(n)) if n >= 0 else ""
                     for n in [
                         ((d - v) - 1 if pd.notnull(v) and pd.notnull(d) else np.nan)
-                        for v, d in zip(vend, dstart)
+                        for v, d in zip(vend, dstart, strict=True)
                     ]
                 ]
                 np2 = [
                     str(int(n)) if n >= 0 else ""
                     for n in [
                         ((j - d) - 1 if pd.notnull(j) and pd.notnull(d) else np.nan)
-                        for d, j in zip(dend, jstart)
+                        for d, j in zip(dend, jstart, strict=True)
                     ]
                 ]
                 db_fail["np1_length"] = np1
@@ -4147,7 +4129,7 @@ def check_contigs(
     save: str | None = None,
     verbose: bool = True,
     **kwargs,
-) -> tuple[Dandelion, AnnData]:
+) -> tuple[Dandelion, AnnData] | Dandelion:
     """
     Check contigs for whether they can be considered as ambiguous or not.
 
@@ -4243,12 +4225,12 @@ def check_contigs(
         acceptable = None
 
     if productive_only:
-        dat = dat_[dat_["productive"].isin(TRUES)].copy()
+        dat: pd.DataFrame = dat_[dat_["productive"].isin(TRUES)].copy()
     else:
         dat = dat_.copy()
 
     if acceptable is not None:
-        dat = dat[dat.locus.isin(acceptable)].copy()
+        dat: pd.DataFrame = dat[dat.locus.isin(acceptable)].copy()
 
     barcode = list(set(dat.cell_id))
 
@@ -4301,8 +4283,9 @@ def check_contigs(
         dat = dat[dat["cell_id"].isin(adata_.obs_names)].copy()
 
     if dat.shape[0] == 0:
+        msg = "No contigs passed filtering. Are you sure that the cell barcodes are matching?"
         raise IndexError(
-            "No contigs passed filtering. Are you sure that the cell barcodes are matching?"
+            msg
         )
     if os.path.isfile(str(data)):
         data_path = Path(data)
@@ -4311,8 +4294,9 @@ def check_contigs(
         if save.endswith(".tsv"):
             write_airr(dat, str(save))
         else:
+            msg = f"{save!s} not suitable. Please provide a file name that ends with .tsv"
             raise ValueError(
-                f"{save!s} not suitable. Please provide a file name that ends with .tsv"
+                msg
             )
 
     if productive_only:
@@ -4403,12 +4387,12 @@ class MarkAmbiguousContigs:
         self.extra_contigs = []
         self.umi_adjustment = {}
         if "v_call_genotyped" in data.columns:
-            v_dict = dict(zip(data["sequence_id"], data["v_call_genotyped"]))
+            v_dict = dict(zip(data["sequence_id"], data["v_call_genotyped"], strict=True))
         else:
-            v_dict = dict(zip(data["sequence_id"], data["v_call"]))
-        d_dict = dict(zip(data["sequence_id"], data["d_call"]))
-        j_dict = dict(zip(data["sequence_id"], data["j_call"]))
-        c_dict = dict(zip(data["sequence_id"], data["c_call"]))
+            v_dict = dict(zip(data["sequence_id"], data["v_call"], strict=True))
+        d_dict = dict(zip(data["sequence_id"], data["d_call"], strict=True))
+        j_dict = dict(zip(data["sequence_id"], data["j_call"], strict=True))
+        c_dict = dict(zip(data["sequence_id"], data["c_call"], strict=True))
         for contig, row in tqdm(
             data.iterrows(),
             desc="Preparing data",
@@ -5503,37 +5487,37 @@ def update_j_multimap(data: list[str], filename_prefix: list[str]):
     if not isinstance(filename_prefix, list):
         filename_prefix = [filename_prefix]
     for i in range(0, len(data)):
-        filePath0 = check_filepath(
+        file_path_0 = check_filepath(
             data[i],
             filename_prefix=filename_prefix[i],
             ends_with="_j_blast.tsv",
             sub_dir="tmp",
         )
-        filePath1 = check_filepath(
+        file_path_1 = check_filepath(
             data[i],
             filename_prefix=filename_prefix[i],
             ends_with="_igblast_db-pass.tsv",
             sub_dir="tmp",
         )
-        filePath1g = check_filepath(
+        file_path_1g = check_filepath(
             data[i],
             filename_prefix=filename_prefix[i],
             ends_with="_igblast_db-pass_genotyped.tsv",
             sub_dir="tmp",
         )
-        filePath2 = check_filepath(
+        file_path_2 = check_filepath(
             data[i],
             filename_prefix=filename_prefix[i],
             ends_with="_igblast_db-all.tsv",
             sub_dir="tmp",
         )
-        filePath3 = check_filepath(
+        file_path_3 = check_filepath(
             data[i],
             filename_prefix=filename_prefix[i],
             ends_with="_igblast_db-fail.tsv",
             sub_dir="tmp",
         )
-        filePath4 = check_filepath(
+        file_path_4 = check_filepath(
             data[i],
             filename_prefix=filename_prefix[i],
             ends_with="_dandelion.tsv",
@@ -5546,21 +5530,21 @@ def update_j_multimap(data: list[str], filename_prefix: list[str]):
             "sequence_end_multimappers",
             "support_multimappers",
         ]
-        check_multimapper(filePath0, filePath2)
-        if filePath0 is not None:
-            jmulti = multimapper(filePath0)
-            if filePath1 is not None:
-                dbpass = load_data(filePath1)
+        check_multimapper(file_path_0, file_path_2)
+        if file_path_0 is not None:
+            jmulti = multimapper(file_path_0)
+            if file_path_1 is not None:
+                dbpass = load_data(file_path_1)
                 for col in jmm_transfer_cols:
                     update_j_col_df(dbpass, jmulti, col)
-                write_airr(dbpass, filePath1)
-            if filePath1g is not None:
-                dbpassg = load_data(filePath1g)
+                write_airr(dbpass, file_path_1)
+            if file_path_1g is not None:
+                dbpassg = load_data(file_path_1g)
                 for col in jmm_transfer_cols:
                     update_j_col_df(dbpassg, jmulti, col)
-                write_airr(dbpassg, filePath1g)
-            if filePath2 is not None:
-                dbfail = load_data(filePath2)
+                write_airr(dbpassg, file_path_1g)
+            if file_path_2 is not None:
+                dbfail = load_data(file_path_2)
                 for col in jmm_transfer_cols:
                     update_j_col_df(dbfail, jmulti, col)
                 for i in dbfail.index:
@@ -5580,9 +5564,9 @@ def update_j_multimap(data: list[str], filename_prefix: list[str]):
                             dbfail.at[i, "j_sequence_start"] = float(jmmappersstart[0])
                             dbfail.at[i, "j_sequence_end"] = float(jmmappersend[0])
                             dbfail.at[i, "j_support"] = float(jmmapperssupport[0])
-                write_airr(dbfail, filePath2)
-            if filePath3 is not None:
-                dball = load_data(filePath3)
+                write_airr(dbfail, file_path_2)
+            if file_path_3 is not None:
+                dball = load_data(file_path_3)
                 for col in jmm_transfer_cols:
                     update_j_col_df(dball, jmulti, col)
                 for i in dball.index:
@@ -5602,12 +5586,12 @@ def update_j_multimap(data: list[str], filename_prefix: list[str]):
                             dball.at[i, "j_sequence_start"] = float(jmmappersstart[0])
                             dball.at[i, "j_sequence_end"] = float(jmmappersend[0])
                             dball.at[i, "j_support"] = float(jmmapperssupport[0])
-                write_airr(dball, filePath3)
-            if filePath4 is not None:
-                dandy = load_data(filePath4)
+                write_airr(dball, file_path_3)
+            if file_path_4 is not None:
+                dandy = load_data(file_path_4)
                 for col in jmm_transfer_cols:
                     update_j_col_df(dandy, jmulti, col)
-                write_airr(dandy, filePath4)
+                write_airr(dandy, file_path_4)
 
 
 def check_multimapper(
@@ -5636,7 +5620,7 @@ def check_multimapper(
             mapped = list(set(df_new["sequence_id"]))
             keep = []
             for j in mapped:
-                tmp = df_new[df_new["sequence_id"] == j][
+                tmp: pd.DataFrame = df_new[df_new["sequence_id"] == j][
                     [
                         "j_sequence_start",
                         "j_sequence_end",
@@ -5653,6 +5637,7 @@ def check_multimapper(
                             keep.append(i)
             keepdf = df_new.loc[keep]
             keepdf.to_csv(filename1, sep="\t", index=False)
+    return keepdf
 
 
 def update_j_col_df(airrdata: pd.DataFrame, jmulti: pd.DataFrame, col: str):

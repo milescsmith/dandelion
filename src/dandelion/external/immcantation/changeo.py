@@ -4,19 +4,19 @@ from typing import Literal
 
 from scanpy import logging as logg
 
+from dandelion.constants import NO_DS, ChainType, DBSource, OrgSpecies
 from dandelion.utilities._utilities import (
-    NO_DS,
     set_germline_env,
     set_igblast_env,
 )
 
 
 def assigngenes_igblast(
-    fasta: Path,
+    fasta: Path | None = None,
     igblast_db: Path | None = None,
-    org: Literal["human", "mouse"] = "human",
-    loci: Literal["ig", "tr"] = "ig",
-    additional_args: list[str] = [],
+    org: OrgSpecies | str = OrgSpecies.human,
+    loci: ChainType | str = ChainType.ig,
+    additional_args: list[str] | None = None,
 ):
     """
     Reannotate with IgBLASTn.
@@ -34,6 +34,14 @@ def assigngenes_igblast(
     additional_args : list[str], optional
         Additional arguments to pass to `AssignGenes.py`.
     """
+    if additional_args is None:
+        additional_args = []
+    if fasta is None:
+        msg = "A path to a fasta file was not provided, which kind of defeats the purpose here"
+        raise ValueError(msg)
+    elif not fasta.exists():
+        msg = f"A file was not found at {fasta}"
+        raise FileNotFoundError(msg)
     env, igdb, fasta = set_igblast_env(igblast_db=igblast_db, input_file=fasta)
     outfolder = fasta.parent / "tmp"
     outfolder.mkdir(parents=True, exist_ok=True)
@@ -59,16 +67,16 @@ def assigngenes_igblast(
             str(outfolder / outfile),
         ]
         cmd += additional_args
-        logg.info("Running command: %s\n" % (" ".join(cmd)))
+        logg.info("Running command: {}\n".format(" ".join(cmd)))
         run(cmd, check=False, env=env)  # logs are printed to terminal
 
 
 def makedb_igblast(
-    fasta: Path | str,
+    fasta: Path | None,
     igblast_output: Path | str | None = None,
     germline: str | None = None,
-    org: Literal["human", "mouse"] = "human",
-    db: Literal["imgt", "ogrdb"] = "imgt",
+    org: OrgSpecies | str = OrgSpecies.human,
+    db: DBSource | str = DBSource.imgt,
     extended: bool = True,
     additional_args: list[str] = [],
     loci: Literal["ig", "tr"] = "ig",
@@ -93,6 +101,9 @@ def makedb_igblast(
     additional_args: list[str], optional
         Additional arguments to pass to `MakeDb.py`.
     """
+    if fasta is None:
+        msg = "A path to a fasta file was not provided, which kind of defeats the purpose here"
+        raise ValueError(msg)
     env, gml, fasta = set_germline_env(
         germline=germline,
         org=org,

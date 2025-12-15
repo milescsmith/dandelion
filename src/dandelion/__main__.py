@@ -1,9 +1,8 @@
 #! /usr/bin/python
-import argparse
 import os
 import shutil
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated
 
 import numpy as np
 import pandas as pd
@@ -12,6 +11,7 @@ import typer
 from scanpy import logging as logg
 
 import dandelion as ddl
+from dandelion.constants import ChainType, DBSource, OrgSpecies
 
 sc.settings.verbosity = 3
 
@@ -25,6 +25,20 @@ ddl_typer = typer.Typer(
 
 @ddl_typer.command(no_args_is_help=True)
 def dandelion_preprocess(
+    fasta_file: Annotated[
+        Path | None,
+        typer.Option(
+            "--fasta",
+            help="Path to the VDJ fasta file containing contigs."
+        )
+    ] = None,
+    annotation_file: Annotated[
+        Path | None,
+        typer.Option(
+            "--anno",
+            help="Path to the contig annotation file matching the above fasta file."
+        )
+    ] = None,
     metadata_file: Annotated[
         Path | None,
         typer.Option(
@@ -39,19 +53,19 @@ def dandelion_preprocess(
         ),
     ] = None,
     chain: Annotated[
-        Literal["tr", "ig"],
+        ChainType,
         typer.Option(
             "--chain",
             help="Whether the data is TR or IG, as the preprocessing pipelines differ.",
         ),
-    ] = "ig",
+    ] = ChainType.ig,
     org: Annotated[
-        str,
+        OrgSpecies,
         typer.Option(
             "--org",
             help=("organism for running the reannotation. human or mouse."),
         ),
-    ] = "human",
+    ] = OrgSpecies.human,
     file_prefix: Annotated[
         str,
         typer.Option(
@@ -64,12 +78,12 @@ def dandelion_preprocess(
         ),
     ] = "all",
     db: Annotated[
-        str,
+        DBSource,
         typer.Option(
             "--db",
             help=("Which database to use for reannotation. imgt or ogrdb."),
         ),
-    ] = "imgt",
+    ] = DBSource.imgt,
     strain: Annotated[
         str | None,
         typer.Option(
@@ -145,11 +159,18 @@ def dandelion_preprocess(
             help="If passed, remove intermediate files that aren't the primary output from the run reults. The intermediate files may be occasionally useful for inspection.",
         ),
     ] = False,
+    igblast_db: Annotated[
+        Path | None,
+        typer.Option(
+            default="--igblast_db",
+            help="Path to IGBlast data"
+        )
+    ] = None
 ):
     """Main dandelion-preprocess."""
 
     # convert loci to lower case for compatibility, and ensure it's in TR/IG
-    chain = chain.lower()
+    chain: str = chain.lower()
 
     # if args.chain not in ["tr", "ig"]:
     #     raise ValueError("Chain must be TR or IG")
@@ -159,87 +180,102 @@ def dandelion_preprocess(
     # sponge up command line arguments to begin with
     start = logg.info("\nBegin preprocessing\n")
 
-    logg.info(
+    _ = logg.info(
         "command line parameters:\n",
         deep=(
             f"--------------------------------------------------------------\n"
-            f"    --meta = {metadata_file}\n"
-            f"    --chain = {chain}\n"
-            f"    --org = {org}\n"
-            f"    --file_prefix = {file_prefix}\n"
-            f"    --db = {db}\n"
-            f"    --strain = {str(strain)}\n"
-            f"    --sep = {sep}\n"
-            f"    --flavour = {flavour}\n"
-            f"    --filter_to_high_confidence = {filter_to_high_confidence}\n"
-            f"    --keep_trailing_hyphen_number = {keep_trailing_hyphen_number}\n"
-            f"    --skip_format_header = {skip_format_header}\n"
-            f"    --skip_tigger = {skip_tigger}\n"
-            f"    --skip_reassign_dj = {skip_reassign_dj}\n"
-            f"    --skip_correct_c = {skip_correct_c}\n"
-            f"    --clean_output = {clean_output}\n"
+            f"    --fasta_file {fasta_file}\n"
+            f"    --annotation_file {annotation_file}\n"
+            f"    --meta {metadata_file}\n"
+            f"    --chain {chain}\n"
+            f"    --org {org}\n"
+            f"    --file_prefix {file_prefix}\n"
+            f"    --db {db}\n"
+            f"    --strain {strain!s}\n"
+            f"    --sep {sep}\n"
+            f"    --flavour {flavour}\n"
+            f"    --filter_to_high_confidence {filter_to_high_confidence}\n"
+            f"    --keep_trailing_hyphen_number {keep_trailing_hyphen_number}\n"
+            f"    --skip_format_header {skip_format_header}\n"
+            f"    --skip_tigger {skip_tigger}\n"
+            f"    --skip_reassign_dj {skip_reassign_dj}\n"
+            f"    --skip_correct_c {skip_correct_c}\n"
+            f"    --clean_output {clean_output}\n"
+            f"    --igdata {igdata}\n"
             f": --------------------------------------------------------------\n"
         ),
     )
 
-    # set up a sample list
-    # do we have metadata?
-    if metadata_file is not None:
-        # if so, read it and use the index as the sample list
-        meta = pd.read_csv(metadata_file, index_col=0)
-        samples = [Path(s) for s in meta]
-        if "individual" in meta.columns:
-            individuals = list(meta["individual"])
-            if not skip_tigger:
-                if any(ind in samples for ind in individuals):
-                    if clean_output:
-                        msg = "Individuals in metadata file must not be the same as sample names when `--clean_output` flag is used. Otherwise, your sample folders will be deleted. Please rename the individual or sample folders, or run without `--clean_output`."
-                        raise ValueError(msg)
+    if fasta_file and annotation_file:
+        ddl.pp.format_fasta(
+            fasta=fasta_file,
+            anno=annotation_file,
+            sep=sep,
+            high_confidence_filtering=filter_to_high_confidence,
+            remove_trailing_hyphen_number=keep_trailing_hyphen_number,
+            filename_prefix=file_prefix,
+        )
+        samples = [fasta_file]
     else:
-        # no metadata file. create empty data frame so we can easily check for
-        # column presence
-        meta = pd.DataFrame()
-        # get list of all subfolders in current folder and run with that
-        samples = []
-        for item in Path.cwd().iterdir():
-            if item.is_dir():
-                if not str(item).startswith(
-                    "."
-                ):  # exclude hidden folders like .ipynb_checkpoints
-                    samples.append(item)
-
-    # STEP ONE - ddl.pp.format_fastas()
-    # do we have a prefix/suffix?
-    if not skip_format_header:
-        if "prefix" in meta.columns:
-            # process with prefix
-            vals = list(meta["prefix"].values)
-            ddl.pp.format_fastas(
-                samples,
-                prefix=vals,
-                sep=sep,
-                high_confidence_filtering=filter_to_high_confidence,
-                remove_trailing_hyphen_number=keep_trailing_hyphen_number,
-                filename_prefix=file_prefix,
-            )
-        elif "suffix" in meta.columns:
-            # process with suffix
-            vals = list(meta["suffix"].values)
-            ddl.pp.format_fastas(
-                samples,
-                suffix=vals,
-                sep=sep,
-                high_confidence_filtering=filter_to_high_confidence,
-                remove_trailing_hyphen_number=keep_trailing_hyphen_number,
-                filename_prefix=file_prefix,
-            )
+        # set up a sample list
+        # do we have metadata?
+        if metadata_file is not None:
+            # if so, read it and use the index as the sample list
+            meta = pd.read_csv(metadata_file, index_col=0)
+            samples = [Path(s) for s in meta]
+            if "individual" in meta.columns:
+                individuals = list(meta["individual"])
+                if not skip_tigger:
+                    if any(ind in samples for ind in individuals):
+                        if clean_output:
+                            msg = "Individuals in metadata file must not be the same as sample names when `--clean_output` flag is used. Otherwise, your sample folders will be deleted. Please rename the individual or sample folders, or run without `--clean_output`."
+                            raise ValueError(msg)
         else:
-            # neither. tag with the sample names as default, if more than one
-            # sample and the data is IG
-            if (len(samples) > 1) and (chain == "ig"):
+            # no metadata file. create empty data frame so we can easily check for
+            # column presence
+            meta = pd.DataFrame()
+            # get list of all subfolders in current folder and run with that
+            samples = []
+            for item in Path.cwd().iterdir():
+                if item.is_dir():
+                    if not str(item).startswith(
+                        "."
+                    ):  # exclude hidden folders like .ipynb_checkpoints
+                        samples.append(item)
+
+        # Sorry, but why do we need any of this? Why not just let someone specify, exactly, which pair of files to use?
+        # STEP ONE - ddl.pp.format_fastas()
+
+        # do we have a prefix/suffix?
+        if not skip_format_header:
+            if "prefix" in meta.columns:
+                # process with prefix
+                vals = list(meta["prefix"].values)
                 ddl.pp.format_fastas(
-                    samples,
-                    prefix=samples,
+                    fastas=samples,
+                    prefix=vals,
+                    sep=sep,
+                    high_confidence_filtering=filter_to_high_confidence,
+                    remove_trailing_hyphen_number=keep_trailing_hyphen_number,
+                    filename_prefix=file_prefix,
+                )
+            elif "suffix" in meta.columns:
+                # process with suffix
+                vals = list(meta["suffix"].values)
+                ddl.pp.format_fastas(
+                    fastas=samples,
+                    suffix=vals,
+                    sep=sep,
+                    high_confidence_filtering=filter_to_high_confidence,
+                    remove_trailing_hyphen_number=keep_trailing_hyphen_number,
+                    filename_prefix=file_prefix,
+                )
+            elif (len(samples) > 1) and (chain == "ig"):
+                # neither. tag with the sample names as default, if more than one
+                # sample and the data is IG
+                ddl.pp.format_fastas(
+                    fastas=samples,
+                    prefix=[str(_) for _ in samples],
                     sep=sep,
                     high_confidence_filtering=filter_to_high_confidence,
                     remove_trailing_hyphen_number=keep_trailing_hyphen_number,
@@ -248,23 +284,24 @@ def dandelion_preprocess(
             else:
                 # no need to tag as it's a single sample.
                 ddl.pp.format_fastas(
-                    samples,
+                    fastas=samples,
                     high_confidence_filtering=filter_to_high_confidence,
                     remove_trailing_hyphen_number=keep_trailing_hyphen_number,
                     filename_prefix=file_prefix,
                 )
-    else:
-        ddl.pp.format_fastas(
-            samples,
-            high_confidence_filtering=filter_to_high_confidence,
-            remove_trailing_hyphen_number=False,
-            filename_prefix=file_prefix,
-        )
+        else:
+            ddl.pp.format_fastas(
+                fastas=samples,
+                high_confidence_filtering=filter_to_high_confidence,
+                remove_trailing_hyphen_number=False,
+                filename_prefix=file_prefix,
+            )
 
     # STEP TWO - ddl.pp.reannotate_genes()
     # no tricks here
     ddl.pp.reannotate_genes(
-        samples,
+        data=samples,
+        igblast_db=igblast_db,
         loci=chain,
         org=org,
         filename_prefix=file_prefix,

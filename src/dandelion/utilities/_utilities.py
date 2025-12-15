@@ -7,6 +7,7 @@ from collections.abc import Callable
 from pathlib import Path
 from subprocess import run
 from typing import (
+    Any,
     Literal,
     TypeVar,
 )
@@ -16,6 +17,8 @@ import numpy as np
 import pandas as pd
 from airr import RearrangementSchema
 
+from dandelion.constants import OrgSpecies, DBSource
+
 # help silence the dtype warning?
 warnings.filterwarnings("ignore", category=pd.errors.DtypeWarning)
 
@@ -23,40 +26,7 @@ F = TypeVar("F", bound=Callable)  # Define a TypeVar for any callable type
 MuData = TypeVar("mudata._core.mudata.MuData")
 PResults = TypeVar("palantir.presults.PResults")
 
-TRUES = ["T", "t", "True", "true", "TRUE", True, "1"]
-FALSES = ["F", "f", "False", "false", "FALSE", False, "0"]
-HEAVYLONG = ["IGH", "TRB", "TRD"]
-LIGHTSHORT = ["IGK", "IGL", "TRA", "TRG"]
-VCALL = "v_call"
-JCALL = "j_call"
-VCALLG = "v_call_genotyped"
-JCALLG = "j_call_genotyped"
-STRIPALLELENUM = "[*][0-9][0-9]"
-NO_DS = [
-    "129S1_SvImJ",
-    "AKR_J",
-    "A_J",
-    "C3H_HeJ",
-    "C57BL_6J",
-    "BALB_c_ByJ",
-    "CBA_J",
-    "DBA_1J",
-    "DBA_2J",
-    "MRL_MpJ",
-    "NOR_LtJ",
-    "NZB_BlNJ",
-    "SJL_J",
-]
-EMPTIES = [
-    None,
-    np.nan,
-    pd.NA,
-    "nan",
-    "NaN",
-    "",
-]
-DEFAULT_PREFIX = "all"
-BOOLEAN_LIKE_COLUMNS = ["extra", "ambiguous"]
+
 
 # for compatibility with python>=3.10
 try:
@@ -92,17 +62,17 @@ def dict_from_table(meta: pd.DataFrame, columns: tuple[str, str]) -> dict:
     if (isinstance(meta, pd.DataFrame)) & (columns is not None):
         meta_ = meta
         if len(columns) == 2:
-            sample_dict = dict(zip(meta_[columns[0]], meta_[columns[1]]))
+            sample_dict = dict(zip(meta_[columns[0]], meta_[columns[1]], strict=True))
     elif (os.path.isfile(str(meta))) & (columns is not None):
         meta_ = pd.read_csv(meta, sep="\t", dtype="object")
         if len(columns) == 2:
-            sample_dict = dict(zip(meta_[columns[0]], meta_[columns[1]]))
+            sample_dict = dict(zip(meta_[columns[0]], meta_[columns[1]], strict=True))
 
     sample_dict = clean_nan_dict(sample_dict)
     return sample_dict
 
 
-def clean_nan_dict(d: dict) -> dict:
+def clean_nan_dict(d: dict[str, Any]) -> dict[str, Any]:
     """
     Remove nan from dictionary.
 
@@ -217,7 +187,7 @@ def isBZIP(filename: str) -> bool:
 
 
 def check_filepath(
-    file_or_folder_path: Path | str,
+    file_or_folder_path: Path,
     filename_prefix: str | None = None,
     ends_with: str | None = None,
     sub_dir: str | None = None,
@@ -228,7 +198,7 @@ def check_filepath(
 
     Parameters
     ----------
-    file_or_folder_path : Path | str
+    file_or_folder_path : Path
         either a string or Path object pointing to a file or folder.
     filename_prefix : str | None, optional
         the prefix of the filename.
@@ -247,11 +217,13 @@ def check_filepath(
     filename_pre = DEFAULT_PREFIX if filename_prefix is None else filename_prefix
 
     ends_with = "" if ends_with is None else ends_with
-    input_path = (
-        Path(str(file_or_folder_path)).expanduser()
-        if str(file_or_folder_path)[0] == "~"
-        else Path(str(file_or_folder_path))
-    )
+    # this is unnecesary. just call `expanduser()`
+    input_path = file_or_folder_path.expanduser()
+    # input_path = (
+    #     Path(str(file_or_folder_path)).expanduser()
+    #     if str(file_or_folder_path)[0] == "~"
+    #     else Path(str(file_or_folder_path))
+    # )
     if input_path.is_file() and str(input_path).endswith(ends_with):
         return input_path
     elif input_path.is_dir():
@@ -523,7 +495,7 @@ def try_numeric_conversion(series: pd.Series) -> pd.Series:
         return sanitize_column(series, "string")
 
 
-def sanitize_data(data: pd.DataFrame, ignore: str = "clone_id") -> None:
+def sanitize_data(data: pd.DataFrame, ignore: str = "clone_id") -> pd.DataFrame:
     """Quick sanitize dtypes."""
     data = data.astype("object")
     data = data.infer_objects()
@@ -655,11 +627,11 @@ def check_travdv(data: pd.DataFrame) -> pd.DataFrame:
     j = [x for x in data["j_call"]]
     c = [x for x in data["c_call"]]
     l = [x for x in data["locus"]]
-    v_dict = dict(zip(contig, v))
-    d_dict = dict(zip(contig, d))
-    j_dict = dict(zip(contig, j))
-    c_dict = dict(zip(contig, c))
-    l_dict = dict(zip(contig, l))
+    v_dict = dict(zip(contig, v, strict=True))
+    d_dict = dict(zip(contig, d, strict=True))
+    j_dict = dict(zip(contig, j, strict=True))
+    c_dict = dict(zip(contig, c, strict=True))
+    l_dict = dict(zip(contig, l, strict=True))
     for co in contig:
         if re.search("TRAV.*/DV", v_dict[co]):
             if same_call(j_dict[co], c_dict[co], d_dict[co], "TRA"):
@@ -774,12 +746,12 @@ def mask_dj(
             if "d_support_blastn" in dat:
                 dat["d_call"] = [
                     "" if s > d_evalue_threshold else c
-                    for c, s in zip(dat["d_call"], dat["d_support_blastn"])
+                    for c, s in zip(dat["d_call"], dat["d_support_blastn"], strict=True)
                 ]
             if "j_support_blastn" in dat:
                 dat["j_call"] = [
                     "" if s > j_evalue_threshold else c
-                    for c, s in zip(dat["j_call"], dat["j_support_blastn"])
+                    for c, s in zip(dat["j_call"], dat["j_support_blastn"], strict=True)
                 ]
 
             write_airr(dat, filePath)
@@ -822,8 +794,8 @@ def format_call(
     metadata: pd.DataFrame,
     call: str,
     suffix_vdj: str = "_VDJ",
-    suffix_vj: str = "_VJ",
-) -> list:
+    suffix_vj: str | None = "_VJ",
+) -> tuple[list[Any | pd.Series | str], list[str], list[str], list[str]]:
     """Extract v/d/j/c call values from data."""
     call_dict = {
         "Multi": "Multi",
@@ -836,14 +808,14 @@ def format_call(
             x[0]: x[1] if present(x[1]) else "None"
             for x, y in zip(
                 metadata[call + suffix_vdj].items(),
-                list(metadata[call + suffix_vj]),
+                list(metadata[call + suffix_vj]), strict=True 
             )
         }
         call_2 = {
             x[0]: x[1] if present(x[1]) else "None"
             for x, y in zip(
                 metadata[call + suffix_vj].items(),
-                list(metadata[call + suffix_vdj]),
+                list(metadata[call + suffix_vdj]), strict=True
             )
         }
         call_2 = {x: y if "|" not in y else "Multi" for x, y in call_2.items()}
@@ -889,7 +861,7 @@ def format_isotype2(metadata: pd.DataFrame) -> list[str]:
     """Format isotype status so that if the chain is called "exception" it is allowed to have the special isotype "IgM/IgD"."""
     isotype_status = [
         (x if "exception" in y else ("Multi" if y == "Extra pair" else x))
-        for x, y in zip(metadata["isotype_status"], metadata["chain_status"])
+        for x, y in zip(metadata["isotype_status"], metadata["chain_status"], strict=True)
     ]
     return isotype_status
 
@@ -916,35 +888,29 @@ def format_locus(
     locus_dict = {}
     for i in metadata.index:
         if productive_only:
-            loc1 = {
-                e: l
-                for e, l in enumerate(
+            loc1 = dict(enumerate(
                     [
                         ll
-                        for ll, p in zip(locus_1[i].split("|"), prod_1[i].split("|"))
+                        for ll, p in zip(locus_1[i].split("|"), prod_1[i].split("|"), strict=True)
                         if p in TRUES
                     ]
-                )
-            }
-            loc2 = {
-                e: l
-                for e, l in enumerate(
+                ))
+            loc2 = dict(enumerate(
                     [
                         ll
-                        for ll, p in zip(locus_2[i].split("|"), prod_2[i].split("|"))
+                        for ll, p in zip(locus_2[i].split("|"), prod_2[i].split("|"), strict=True)
                         if p in TRUES
                     ]
-                )
-            }
+                ))
         else:
-            loc1 = {e: l for e, l in enumerate([ll for ll in locus_1[i].split("|")])}
-            loc2 = {e: l for e, l in enumerate([ll for ll in locus_2[i].split("|")])}
+            loc1 = dict(enumerate([ll for ll in locus_1[i].split("|")]))
+            loc2 = dict(enumerate([ll for ll in locus_2[i].split("|")]))
         loc1x, loc2x = [], []
-        if not all([px == "None" for px in loc1.values()]):
+        if not all(px == "None" for px in loc1.values()):
             loc1xx = list(loc1.values())
             loc1x = [ij[:2] for ij in loc1.values()]
 
-        if not all([px == "None" for px in loc2.values()]):
+        if not all(px == "None" for px in loc2.values()):
             loc2xx = list(loc2.values())
             loc2x = [ij[:2] for ij in loc2.values()]
 
@@ -1123,9 +1089,9 @@ def format_chain_status(locus_status):
 
 def set_germline_env(
     germline: str | None = None,
-    org: Literal["human", "mouse"] = "human",
+    org: OrgSpecies | str = OrgSpecies.human
     input_file: Path | str | None = None,
-    db: Literal["imgt", "ogrdb"] = "imgt",
+    db: DBSource | str = DBSource.imgt,
 ) -> tuple[dict[str, str], Path, Path | None]:
     """
     Set the paths to germline database and environment variables and relevant input files.
@@ -1260,10 +1226,11 @@ def sum_col(vals: list) -> float | int:
 
 
 def check_data(
-    data: list[Path | str] | Path | str, filename_prefix: list[str] | str | None
-) -> tuple[list[str], list[str]]:
+    data: list[Path] | Path,
+    filename_prefix: list[str | None] | str | None,
+) -> tuple[list[Path], list[str | None]]:
     """Quick check for data and filename prefixes"""
-    if type(data) is not list:
+    if not isinstance(data, list):
         data = [data]
     if not isinstance(filename_prefix, list):
         filename_prefix = [filename_prefix]
@@ -1271,7 +1238,7 @@ def check_data(
             if len(data) > 1:
                 filename_prefix = filename_prefix * len(data)
     if all(t is None for t in filename_prefix):
-        filename_prefix = [None for d in data]
+        filename_prefix = [None for _ in data]
     return data, filename_prefix
 
 
@@ -1288,7 +1255,7 @@ def clear_h5file(filename: Path | str) -> None:
 
 
 def write_fasta(
-    fasta_dict: dict[str, str], out_fasta: Path | str, overwrite=True
+    fasta_dict: dict[str, str], out_fasta: Path, overwrite=True
 ) -> None:
     """
     Generic fasta writer using fasta_iterator
@@ -1302,15 +1269,16 @@ def write_fasta(
     overwrite : bool, optional
         whether or not to overwrite the output file (out_fasta).
     """
-    if overwrite:
-        fh = open(out_fasta, "w")
-        fh.close()
-    out = ""
-    for key, value in fasta_dict.items():
-        out = f">{key}\n{value}\n"
-        write_output(out, out_fasta)
+    if out_fasta.exists() and not overwrite:
+        msg = f"{out_fasta} already exists! Rerun with `overwrite` to proceed."
+        raise FileExistsError(msg)
+    else:
+        with out_fasta.open() as fh:
+            for key, value in fasta_dict.items():
+                out = f">{key}\n{value}\n"
+                fh.write(out)
 
-
+# MCS: what is the point of this?
 def write_output(out: str, file: Path | str) -> None:
     """General line writer."""
     fh = open(file, "a")

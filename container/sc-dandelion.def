@@ -1,6 +1,11 @@
 Bootstrap: docker
 
-From: ubuntu:trixie
+From: astral/uv:python3.12-trixie-slim
+
+%arguments
+    DEBIAN_FRONTEND=noninteractive
+    LLVM_VERSION=19
+    IGBLAST_VERSION=1.22.0
 
 %setup
     if [ ! -d /share ]; then
@@ -8,37 +13,71 @@ From: ubuntu:trixie
     fi
 
 %files
-    environment.yml /environment.yml
-    scripts/setup_mamba.sh /share/setup_mamba.sh
-    scripts/dandelion_preprocess.py /share/dandelion_preprocess.py
-    scripts/changeo_clonotypes.py /share/changeo_clonotypes.py
+    scripts/setup_libraries.sh /share/setup_libraries.sh
+    # scripts/dandelion_preprocess.py /share/dandelion_preprocess.py
+    # scripts/changeo_clonotypes.py /share/changeo_clonotypes.py
     scripts/prepare_imgt_database.py /share/prepare_imgt_database.py
     scripts/prepare_ogrdb_database.py /share/prepare_ogrdb_database.py
     scripts/utils.py /share/utils.py
-    tests /tests
-
-%post
-    # Setup and install dependencies
-    . /share/setup_mamba.sh
-    # Download and setup reference databases
-    . /etc/profile.d/igblast.sh # so i can get the right igblast version
-    python /share/prepare_imgt_database.py --outdir /share/database --igblast_dir /share/ncbi-igblast-$IGBLAST_VERSION
-    python /share/prepare_ogrdb_database.py --outdir /share/database
+    requirements.txt /share/requirements.txt
+    sc_dandelion-0.6.1.dev0+dirty-py3-none-any.whl /share/sc_dandelion-0.6.1.dev0+dirty-py3-none-any.whl
 
 %environment
     . /etc/profile.d/igblast.sh
     export GERMLINE=/share/database/germlines/
     export IGDATA=/share/database/igblast/
     export BLASTDB=/share/database/blast/
+    export IGBLAST_VERSION={{ IGBLAST_VERSION }}
+
+%post
+    apt update -qq
+    apt install aptitude -y
+    aptitude install -y \
+        ca-certificates \
+        curl \
+        gnupg \
+        dirmngr \
+        build-essential \
+        wget \
+        clang-tidy-{{ LLVM_VERSION }} \
+        clang-format-{{ LLVM_VERSION }} \
+        clang-tools-{{ LLVM_VERSION }} \
+        llvm-{{ LLVM_VERSION }}-dev \
+        lld-{{ LLVM_VERSION }}
+    gpg --keyserver keyserver.ubuntu.com --recv-key '95C0FAF38DB3CCAD0C080A7BDC78B2DDEABC47B7'
+    gpg --armor --export '95C0FAF38DB3CCAD0C080A7BDC78B2DDEABC47B7' | tee /etc/apt/trusted.gpg.d/cran_debian_key.asc
+    echo 'deb [signed-by=/etc/apt/trusted.gpg.d/cran_debian_key.asc] http://cloud.r-project.org/bin/linux/debian trixie-cran40/' >> /etc/apt/sources.list.d/sources.list
+    apt modernize-sources --assume-yes
+    aptitude update
+    aptitude full-upgrade -y
+    aptitude install -y \
+        cmake \
+        git \
+        libcurl4-openssl-dev \
+        r-base \
+        ncbi-blast+
+    aptitude autoclean
+    aptitude clean
+    rm -rf /tmp/downloaded_packages/*
+    rm -rf /var/lib/apt/lists/*
+    uv pip install --no-cache --compile-bytecode --system --requirements /share/requirements.txt
+    uv pip install --no-cache --compile-bytecode --system /share/sc_dandelion-0.6.1.dev0+dirty-py3-none-any.whl
+    Rscript -e "install.packages('BiocManager')"
+    Rscript -e "BiocManager::install(c('Biostrings', 'Rsamtools', 'cigarillo', 'GenomicAlignments'))"
+    Rscript -e "BiocManager::install(c('stringi', 'optparse', 'tigger', 'shazam', 'airr', 'alakazam'))"
+    mkdir /share/ncbi-igblast
+    curl -L "ftp://ftp.ncbi.nih.gov/blast/executables/igblast/release/LATEST/ncbi-igblast-${IGBLAST_VERSION}-x64-linux.tar.gz" | \
+        tar -xzvf - -C /share/ncbi-igblast --strip-components 1
+    echo "export PATH=/share/ncbi-igblast/bin:$PATH" > /etc/profile.d/igblast.sh
+    echo "export IGBLAST_VERSION=$latest_version" >> /etc/profile.d/igblast.sh
+    chmod +x /etc/profile.d/igblast.sh
+
+    /etc/profile.d/igblast.sh
+    python /share/prepare_imgt_database.py --makeblastdb /usr/bin/makeblastdb --outdir /share/database --igblast_dir /share/ncbi-igblast
+    python /share/prepare_ogrdb_database.py --outdir /share/database --makeblastdb /usr/bin/makeblastdb
+
 
 %runscript
     alias dandelion-preprocess='/share/dandelion_preprocess.py'
     alias changeo-clonotypes='/share/changeo_clonotypes.py'
     eval ${@}
-
-%test
-    ls /share
-    which blastn
-    which igblastn
-    mamba list
-    pytest -p no:cacheprovider /tests -W ignore::DeprecationWarning -W ignore::PendingDeprecationWarning -W ignore::FutureWarning

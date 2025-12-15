@@ -8,11 +8,12 @@ import re
 import shutil
 import subprocess
 import sys
-
 from datetime import datetime
 from pathlib import Path
+from shutil import which
 from urllib.request import urlopen
 
+from rich import print as rprint
 from utils import Tree, fasta_iterator, write_fasta
 
 
@@ -105,19 +106,24 @@ def download_germline_and_process(
         url = (
             f"{source}/GENElect?query={query_type}+{chain}&species={query}{url_suffix}"
         )
+        rprint(url)
         file_name = (
-            f"{str(file_path)}/imgt_{add_prefix}{species}_{chain}{add_suffix}.fasta"
+            f"{file_path!s}/imgt_{add_prefix}{species}_{chain}{add_suffix}.fasta"
         )
-
+        # print(file_name)
         # Stop if the file already exists
         if os.path.exists(file_name):
             logging.info(f"Skipping download of {file_name} as it already exists.")
             return
         # else download the file
-        with urlopen(url, timeout=60) as response:
-            content = (
-                response.read().decode("utf-8").split("<pre>")[2].split("</pre>")[0]
-            )
+        if url.startswith(("http:", "https:")):
+            with urlopen(url, timeout=60) as response:  # noqa: S310 I have no idea why it keeps flagging this as the line above takes care of the issue
+                content = (
+                    response.read().decode("utf-8").split("<pre>")[2].split("</pre>")[0]
+                )
+        else:
+            msg = "URL must start with 'http:' or 'https:'"
+            raise ValueError(msg)
 
         # Check if the downloaded content is empty
         if content.rstrip() == "":
@@ -132,21 +138,31 @@ def download_germline_and_process(
         content_lines = [line for line in content.splitlines() if line.strip()]
 
         # Substitute patterns in lines starting with '>'
-        for i, line in enumerate(content_lines):
-            if line.startswith(">"):
-                # Example substitution: Homo sapiens to Homo_sapiens
-                line = re.sub(
+
+        content_lines = [
+            re.sub(
                     imgt_out_dict[species][0], imgt_out_dict[species][1], line
                 )
-                # Add more substitutions as needed
-                content_lines[i] = line
+            if line.startswith(">")
+            else line
+            for i, line in enumerate(content_lines)
+        ]
+
+        # for i, line in enumerate(content_lines):
+        #     if line.startswith(">"):
+        #         # Example substitution: Homo sapiens to Homo_sapiens
+        #         line = re.sub(
+        #             imgt_out_dict[species][0], imgt_out_dict[species][1], line
+        #         )
+        #         # Add more substitutions as needed
+        #         [i] = line
 
         content = "\n".join(content_lines)
 
         with open(file_name, "w") as output_file:
             output_file.write(content)
     except Exception as e:
-        logging.error(f"Failed to download {species} {chain}: {str(e)}")
+        logging.error(f"Failed to download {species} {chain}: {e!s}")
 
 
 def download_bcr_constant_and_process(
@@ -178,7 +194,7 @@ def download_bcr_constant_and_process(
         f"{source}/GENElect?query=8.1+IGKC&species={query}&IMGTlabel=C-REGION",
         f"{source}/GENElect?query=8.1+IGLC&species={query}&IMGTlabel=C-REGION",
     ]
-    file_name = Path(f"{str(file_path)}/{species}_BCR_C.fasta")
+    file_name = Path(f"{file_path!s}/{species}_BCR_C.fasta")
     file_path.mkdir(parents=True, exist_ok=True)
     # Stop if the file already exists
     if os.path.exists(file_name):
@@ -191,10 +207,14 @@ def download_bcr_constant_and_process(
     contents = ""
     newline = ""
     for url in urls:
-        with urlopen(url, timeout=60) as response:
-            content = (
-                response.read().decode("utf-8").split("<pre>")[2].split("</pre>")[0]
-            )
+        if url.startswith(("http:", "https:")):
+            with urlopen(url, timeout=60) as response:  # noqa: S310 I have no idea why it keeps flagging this as the line above takes care of the issue
+                content = (
+                    response.read().decode("utf-8").split("<pre>")[2].split("</pre>")[0]
+                )
+        else:
+            msg = "URL must start with 'http:' or 'https:'"
+            raise ValueError(msg)
         # Remove empty lines
         content_lines = [line for line in content.splitlines() if line.strip()]
         contents += newline + "\n".join(content_lines)
@@ -219,7 +239,8 @@ def main():
     out_dir = Path(args.outdir)
     out_dir.mkdir(parents=True, exist_ok=True)
     if args.makeblastdb_bin is None:
-        makeblastdb = Path(sys.executable).parent / "makeblastdb"
+        makeblastdb = Path(which("makeblastdb"))
+        # makeblastdb = Path(sys.executable).parent / "makeblastdb"
     else:
         makeblastdb = Path(args.makeblastdb_bin)
     species_dict = {
@@ -245,7 +266,7 @@ def main():
     log_file = out_dir / "imgt_database.log"
     fh = open(log_file, "w")
     fh.close()
-    source = "https://www.imgt.org/genedb"
+    source = "https://imgt.org/genedb"
     logging.basicConfig(
         filename=log_file,
         level=logging.INFO,
@@ -254,7 +275,7 @@ def main():
     )
     logging.getLogger().addHandler(logging.StreamHandler(sys.stdout))
     # Log the start time
-    start_time = datetime.now()
+    start_time = datetime.now(tz=datetime.UTC)  # ty:ignore[unresolved-attribute] yes, it does in fact have that attribute
     logging.info(f"Source:  {source}")
     logging.info(f"Out directory:  {Path(args.outdir).absolute()}")
     logging.info(f"Download date: {start_time.strftime('%Y-%m-%d')}")

@@ -1,7 +1,9 @@
 #!/usr/bin/env python
 import _pickle as cPickle
 import bz2
+from collections.abc import Generator
 import gzip
+from io import TextIOWrapper
 import json
 import os
 import pickle
@@ -103,7 +105,7 @@ CELLRANGER = [
 ]
 
 
-def fasta_iterator(fh: str) -> tuple[str, str]:
+def fasta_iterator(fh: TextIOWrapper) -> Generator[tuple[str, str]]:
     """Read in a fasta file as an iterator."""
     while True:
         line = fh.readline()
@@ -774,7 +776,7 @@ def parse_annotation(data: pd.DataFrame) -> defaultdict:
 
 
 def change_file_location(
-    data: list[Path | str],
+    data: list[Path],
     filename_prefix: list[str] | str | None = None,
 ) -> None:
     """
@@ -784,7 +786,7 @@ def change_file_location(
 
     Parameters
     ----------
-    data : list[Path | str]
+    data : list[Path]
         list of data folders containing the .tsv files. if provided as a single string, it will first be converted to a
         list; this allows for the function to be run on single/multiple samples.
     filename_prefix : list[str] | str | None, optional
@@ -834,7 +836,7 @@ def change_file_location(
 
 
 def move_to_tmp(
-    data: list[Path | str], filename_prefix: list[str] | str | None = None
+    data: list[Path], filename_prefix: list[str] | str | None = None
 ) -> None:
     """Move file to tmp."""
     data, filename_prefix = check_data(data, filename_prefix)
@@ -854,7 +856,7 @@ def move_to_tmp(
 
 
 def make_all(
-    data: list[Path | str],
+    data: list[Path],
     filename_prefix: list[str] | str | None = None,
     loci: Literal["ig", "tr"] = "tr",
 ) -> None:
@@ -928,7 +930,7 @@ def make_all(
 
 
 def rename_dandelion(
-    data: list[Path | str],
+    data: list[Path],
     filename_prefix: list[str] | str | None = None,
     ends_with: str = "_igblast_db-pass_genotyped.tsv",
     sub_dir: str | None = None,

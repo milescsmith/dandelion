@@ -79,6 +79,7 @@ dependencies = [
   "nxviz<0.7.7",
   "rich>=14.2.0",
   "typer>=0.20.0",
+  "prseq>=0.0.33",
 ]
 
 [project.urls]
